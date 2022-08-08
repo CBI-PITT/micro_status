@@ -74,6 +74,8 @@ SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL")
 SLACK_HEADERS = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8', 'Authorization': f'Bearer {os.getenv("SLACK_TOKEN")}'}
 print('------------------------SLACK_HEADERS', SLACK_HEADERS)
 print('------------------------SLACK_CHANNEL_ID', SLACK_CHANNEL_ID)
+PROGRESS_TIMEOUT = 600  # seconds
+DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
 
 def check_if_new(file_path):
@@ -260,13 +262,9 @@ class Dataset:
             if subdir.is_file() or 'layer' not in subdir.name:
                 continue
             color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
-            channels = len(color_dirs)
             for color_dir in color_dirs:
-                # print('color_dir', color_dir)
                 images_dir = os.path.join(color_dir, 'images')
                 ribbons = len(os.listdir(images_dir))
-                # print("Ribbons expected:", self.ribbons_in_z_layer)
-                # print("Ribbons found:", ribbons)
                 ribbons_finished += ribbons
                 if ribbons < self.ribbons_in_z_layer:
                     break
@@ -281,9 +279,12 @@ class Dataset:
         res = cur.execute(f'UPDATE dataset SET z_layers_current = {z_layers_current} WHERE id={self.db_id}')
         con.commit()
         con.close()
+        self.ribbons_finished = ribbons_finished
+        self.z_layers_current = z_layers_current
         return ribbons_finished > self.ribbons_finished
 
     def check_imaging_finished(self):
+        # TODO: this check can be made in the above fn
         print("--------------------Checking whether imaging finished")
         file_path = Path(self.path_on_fast_store)
         ribbons_finished = 0
@@ -292,7 +293,6 @@ class Dataset:
             if subdir.is_file() or 'layer' not in subdir.name:
                 continue
             color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
-            channels = len(color_dirs)
             for color_dir in color_dirs:
                 images_dir = os.path.join(color_dir, 'images')
                 ribbons = len(os.listdir(images_dir))
@@ -306,10 +306,13 @@ class Dataset:
         msg_map = {
             'imaging_started': "Imaging of {} {} {} *_started_*",
             'imaging_finished': "Imaging of {} {} {} *_finished_*",
-            'imaging_paused': "Imaging of {} {} {} *_paused_*",
+            'imaging_paused': "**WARNING:** Imaging of {} {} {} *_paused_* at z-layer {}",
             'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
         }
-        msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
+        if msg_type == 'imaging_paused':
+            msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
+        else:
+            msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
         print("Message text", msg_text)
         payload = {
             "channel": SLACK_CHANNEL_ID,
@@ -327,10 +330,37 @@ class Dataset:
         return response
 
     def mark_no_imaging_progress(self):
-        pass
+        progress_stopped_at = datetime.now().strftime(DATETIME_FORMAT)
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET imaging_status = "paused" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET imaging_no_progress_time = "{progress_stopped_at}" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        self.imaging_status = "paused"
+        self.imaging_no_progress_time = progress_stopped_at
 
     def mark_has_imaging_progress(self):
-        pass
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET imaging_status = "in_progress" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET imaging_no_progress_time = null WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        self.imaging_status = "in_progress"
+        self.imaging_no_progress_time = None
 
     def mark_imaging_finished(self):
         con = sqlite3.connect(DB_LOCATION)
@@ -373,15 +403,15 @@ def check_imaging():
             dataset = read_dataset_record(file_path)
             print("Read dataset Obj:", dataset)
             if not dataset or dataset.imaging_status == 'finished':
-                print("----------------No dataset or Imaging status is finished")
+                print("----------------No dataset or Imaging status is 'finished'")
                 continue
             elif dataset.imaging_status == 'in_progress':
-                print("--------------Imaging status is in-progress")
+                print("--------------Imaging status is 'in-progress'")
                 got_finished = dataset.check_imaging_finished()
                 print("Imaging finished:", got_finished)
                 if got_finished:
                     dataset.mark_imaging_finished()
-                    # response = dataset.send_message('imaging_finished')
+                    response = dataset.send_message('imaging_finished')
                     continue
                 has_progress = dataset.check_imaging_progress()
                 print("Imaging has progress:", has_progress)
@@ -391,11 +421,12 @@ def check_imaging():
                     if not dataset.imaging_no_progress_time:
                         dataset.mark_no_imaging_progress()
                     else:
-                        if datetime.now() - dataset.imaging_no_progress_time > 300:  # no progress for 5 minutes
+                        progress_stopped_at = datetime.strptime(dataset.imaging_no_progress_time, DATETIME_FORMAT)
+                        if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                             pass
                             # response = dataset.send_message('imaging_paused')
             elif dataset.imaging_status == 'paused':
-                print("----------------Imaging status is paused")
+                print("----------------Imaging status is 'paused'")
                 has_progress = dataset.check_imaging_progress()  # maybe imaging resumed
                 if not has_progress:
                     continue
