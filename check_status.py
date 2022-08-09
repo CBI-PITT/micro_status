@@ -55,6 +55,7 @@ import re
 import requests
 import sqlite3
 from datetime import datetime
+from glob import glob
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -72,8 +73,6 @@ SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL")
 SLACK_HEADERS = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8', 'Authorization': f'Bearer {os.getenv("SLACK_TOKEN")}'}
-print('------------------------SLACK_HEADERS', SLACK_HEADERS)
-print('------------------------SLACK_CHANNEL_ID', SLACK_CHANNEL_ID)
 PROGRESS_TIMEOUT = 600  # seconds
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
@@ -198,7 +197,6 @@ def read_dataset_record(file_path):
     cur = con.cursor()
     record = cur.execute(f'SELECT * FROM dataset WHERE path_on_fast_store="{str(file_path)}"').fetchone()
     con.close()
-    print("Result of SELECT dataset", record)
 
     if not record:
         print("WARNING: broken/partial dataset", file_path)
@@ -232,8 +230,11 @@ def read_dataset_record(file_path):
         imaging_no_progress_time = record[16],
         processing_no_progress_time = record[17]
     )
-    print("Created Dataset Obj")
     return dataset
+
+
+class Found(BaseException):
+    pass
 
 
 class Dataset:
@@ -256,19 +257,30 @@ class Dataset:
     def check_imaging_progress(self):
         print("--------------------in check imaging progress")
         file_path = Path(self.path_on_fast_store)
-        ribbons_finished = 0
-        subdirs = os.scandir(file_path.parent)
-        for subdir in subdirs:
-            if subdir.is_file() or 'layer' not in subdir.name:
-                continue
-            color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
-            for color_dir in color_dirs:
-                images_dir = os.path.join(color_dir, 'images')
-                ribbons = len(os.listdir(images_dir))
-                ribbons_finished += ribbons
-                if ribbons < self.ribbons_in_z_layer:
-                    break
-        z_layers_current = re.findall(r"\d+", subdir.name)[-1]
+        ribbons_finished = 0  # TODO: optimize, start with current z layer, not mrom 0
+        subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
+        subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
+        if len(subdirs) > 1000:
+            len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
+            len3 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 3
+            subdirs_0 = filter(len4, subdirs)
+            subdirs_1 = filter(len3, subdirs)
+            subdirs = list(subdirs_0) + list(subdirs_1)
+
+        try:
+            for subdir in subdirs:
+                color_dirs = [x.path for x in os.scandir(subdir) if x.is_dir()]
+                for color_dir in color_dirs:
+                    images_dir = os.path.join(color_dir, 'images')
+                    ribbons = len(os.listdir(images_dir))
+                    ribbons_finished += ribbons
+                    if ribbons < self.ribbons_in_z_layer:
+                        raise Found
+        except Found:
+            pass
+        finally:
+            z_layers_current = re.findall(r"\d+", os.path.basename(subdir))[-1]
+
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET ribbons_finished = {ribbons_finished} WHERE id={self.db_id}')
@@ -279,20 +291,28 @@ class Dataset:
         res = cur.execute(f'UPDATE dataset SET z_layers_current = {z_layers_current} WHERE id={self.db_id}')
         con.commit()
         con.close()
+        ribbons_finished_prev = self.ribbons_finished
         self.ribbons_finished = ribbons_finished
         self.z_layers_current = z_layers_current
-        return ribbons_finished > self.ribbons_finished
+        return ribbons_finished > ribbons_finished_prev
+
 
     def check_imaging_finished(self):
         # TODO: this check can be made in the above fn
         print("--------------------Checking whether imaging finished")
         file_path = Path(self.path_on_fast_store)
         ribbons_finished = 0
-        subdirs = os.scandir(file_path.parent)
+        subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
+        subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
+        if self.z_layers_total > 1000:
+            len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
+            len3 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 3
+            subdirs_0 = filter(len4, subdirs)
+            subdirs_1 = filter(len3, subdirs)
+            subdirs = list(subdirs_0) + list(subdirs_1)
+
         for subdir in subdirs:
-            if subdir.is_file() or 'layer' not in subdir.name:
-                continue
-            color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
+            color_dirs = [x.path for x in os.scandir(subdir) if x.is_dir()]
             for color_dir in color_dirs:
                 images_dir = os.path.join(color_dir, 'images')
                 ribbons = len(os.listdir(images_dir))
@@ -300,6 +320,7 @@ class Dataset:
                 if ribbons < self.ribbons_in_z_layer:
                     break
         return ribbons_finished == self.ribbons_total
+
 
     def send_message(self, msg_type):
         print("---------------------In send message")
@@ -372,6 +393,7 @@ class Dataset:
 
     @property
     def ribbons_in_z_layer(self):
+        # TODO: fails here if file was removed
         with open(self.path_on_fast_store, 'r') as f:
             data = f.read()
         soup = BeautifulSoup(data, "xml")
@@ -388,20 +410,17 @@ def check_imaging():
                 if 'stack' in str(file_path.parent.name):
                     vs_series_files.append(str(file_path))
     print("Unique datasets found: ", len(vs_series_files))
+    # TODO: files that were deleted, should also be removed from db
 
     for file_path in vs_series_files:
         is_new = check_if_new(file_path)
         if is_new:
-            print("-----------------------New dataset")
+            print("-----------------------New dataset--------------------------")
             dataset = create_dataset_record(file_path)
-            print("-----------------------Created dataset obj")
-            print("-----------------------Trying to sent msg")
             response = dataset.send_message('imaging_started')
             print(response)
         else:
-            print("-----------------------Dataset already known")
             dataset = read_dataset_record(file_path)
-            print("Read dataset Obj:", dataset)
             if not dataset or dataset.imaging_status == 'finished':
                 print("----------------No dataset or Imaging status is 'finished'")
                 continue
