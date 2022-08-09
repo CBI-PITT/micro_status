@@ -54,6 +54,7 @@ import os
 import re
 import requests
 import sqlite3
+import time
 from datetime import datetime
 from glob import glob
 from pathlib import Path
@@ -207,12 +208,16 @@ def read_dataset_record(file_path):
     cur = con.cursor()
     pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
     con.close()
+    if pi_name:
+        pi_name = pi_name[0]
 
     cl_number_id = record[4]
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
     con.close()
+    if cl_number:
+        cl_number = cl_number[0]
 
     dataset = Dataset(
         db_id = record[0],
@@ -255,7 +260,6 @@ class Dataset:
         self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
 
     def check_imaging_progress(self):
-        print("--------------------in check imaging progress")
         file_path = Path(self.path_on_fast_store)
         ribbons_finished = 0  # TODO: optimize, start with current z layer, not mrom 0
         subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
@@ -299,7 +303,6 @@ class Dataset:
 
     def check_imaging_finished(self):
         # TODO: this check can be made in the above fn
-        print("--------------------Checking whether imaging finished")
         file_path = Path(self.path_on_fast_store)
         ribbons_finished = 0
         subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
@@ -323,7 +326,7 @@ class Dataset:
 
 
     def send_message(self, msg_type):
-        print("---------------------In send message")
+        print("---------------------In send message------------------------")
         msg_map = {
             'imaging_started': "Imaging of {} {} {} *_started_*",
             'imaging_finished': "Imaging of {} {} {} *_finished_*",
@@ -354,18 +357,18 @@ class Dataset:
         progress_stopped_at = datetime.now().strftime(DATETIME_FORMAT)
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET imaging_status = "paused" WHERE id={self.db_id}')
-        con.commit()
-        con.close()
-
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET imaging_no_progress_time = "{progress_stopped_at}" WHERE id={self.db_id}')
         con.commit()
         con.close()
-
-        self.imaging_status = "paused"
         self.imaging_no_progress_time = progress_stopped_at
+
+    def mark_paused(self):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET imaging_status = "paused" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.imaging_status = "paused"
 
     def mark_has_imaging_progress(self):
         con = sqlite3.connect(DB_LOCATION)
@@ -413,6 +416,7 @@ def check_imaging():
     # TODO: files that were deleted, should also be removed from db
 
     for file_path in vs_series_files:
+        print("Working on: ", file_path)
         is_new = check_if_new(file_path)
         if is_new:
             print("-----------------------New dataset--------------------------")
@@ -422,10 +426,10 @@ def check_imaging():
         else:
             dataset = read_dataset_record(file_path)
             if not dataset or dataset.imaging_status == 'finished':
-                print("----------------No dataset or Imaging status is 'finished'")
+                print("No dataset or Imaging status is 'finished'")
                 continue
             elif dataset.imaging_status == 'in_progress':
-                print("--------------Imaging status is 'in-progress'")
+                print("Imaging status is 'in-progress'")
                 got_finished = dataset.check_imaging_finished()
                 print("Imaging finished:", got_finished)
                 if got_finished:
@@ -443,10 +447,11 @@ def check_imaging():
                     else:
                         progress_stopped_at = datetime.strptime(dataset.imaging_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                            dataset.mark_paused()
                             response = dataset.send_message('imaging_paused')
                             print(response)
             elif dataset.imaging_status == 'paused':
-                print("----------------Imaging status is 'paused'")
+                print("Imaging status is 'paused'")
                 has_progress = dataset.check_imaging_progress()  # maybe imaging resumed
                 if not has_progress:
                     continue
@@ -466,6 +471,8 @@ def check_processing():
 def scan():
     check_imaging()
     check_processing()
+    print("========================== Waiting 30 seconds ========================")
+    time.sleep(30)
 
 
 if __name__ == "__main__":
