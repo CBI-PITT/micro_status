@@ -431,6 +431,7 @@ def check_imaging():
                 if got_finished:
                     dataset.mark_imaging_finished()
                     response = dataset.send_message('imaging_finished')
+                    print(response)
                     continue
                 has_progress = dataset.check_imaging_progress()
                 print("Imaging has progress:", has_progress)
@@ -442,8 +443,8 @@ def check_imaging():
                     else:
                         progress_stopped_at = datetime.strptime(dataset.imaging_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                            pass
-                            # response = dataset.send_message('imaging_paused')
+                            response = dataset.send_message('imaging_paused')
+                            print(response)
             elif dataset.imaging_status == 'paused':
                 print("----------------Imaging status is 'paused'")
                 has_progress = dataset.check_imaging_progress()  # maybe imaging resumed
@@ -451,7 +452,8 @@ def check_imaging():
                     continue
                 else:
                     dataset.mark_has_imaging_progress()
-                    # response = dataset.send_message('imaging_resumed')
+                    response = dataset.send_message('imaging_resumed')
+                    print(response)
 
 
 def check_processing():
