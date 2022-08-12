@@ -62,9 +62,6 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-# con = sqlite3.connect('/CBI_Hive/CBI/Iana/projects/internal/RSCM_datasets')
-# cur = con.cursor()
-
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
 HIVE_ACQUISITION_FOLDER = "/CBI_Hive/Acquire"
@@ -373,18 +370,19 @@ class Dataset:
     def mark_has_imaging_progress(self):
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET imaging_status = "in_progress" WHERE id={self.db_id}')
-        con.commit()
-        con.close()
-
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET imaging_no_progress_time = null WHERE id={self.db_id}')
         con.commit()
         con.close()
 
-        self.imaging_status = "in_progress"
         self.imaging_no_progress_time = None
+
+    def mark_resumed(self):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET imaging_status = "in_progress" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.imaging_status = "in_progress"
 
     def mark_imaging_finished(self):
         con = sqlite3.connect(DB_LOCATION)
@@ -440,6 +438,8 @@ def check_imaging():
                 has_progress = dataset.check_imaging_progress()
                 print("Imaging has progress:", has_progress)
                 if has_progress:
+                    if dataset.imaging_no_progress_time:
+                        dataset.mark_has_imaging_progress()
                     continue
                 else:
                     if not dataset.imaging_no_progress_time:
@@ -457,6 +457,7 @@ def check_imaging():
                     continue
                 else:
                     dataset.mark_has_imaging_progress()
+                    dataset.mark_resumed()
                     response = dataset.send_message('imaging_resumed')
                     print(response)
 
