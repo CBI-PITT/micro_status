@@ -73,6 +73,7 @@ SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL")
 SLACK_HEADERS = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8', 'Authorization': f'Bearer {os.getenv("SLACK_TOKEN")}'}
 PROGRESS_TIMEOUT = 600  # seconds
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
+RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 
 
 def check_if_new(file_path):
@@ -400,6 +401,27 @@ class Dataset:
         soup = BeautifulSoup(data, "xml")
         return int(soup.find('grid_cols').text)
 
+    @property
+    def rscm_txt_file_name(self):
+        return f"{str(self.db_id).zfill(5)}_{self.pi}_{self.cl_number}_{self.name}.txt"
+
+    def start_processing(self):
+        """create txt file in the RSCM queue stitch directory
+        file name: {dataset_id}_{pi_name}_{cl_number}_{dataset_name}.txt
+        this way the earlier datasets go in first
+        """
+        dat_file_path = Path(self.path_on_fast_store)
+        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
+        contents = f"rootDir={str(dat_file_path.parent)}"
+        with open(txt_file_path, "w") as f:
+            f.write(contents)
+        print("-----------------------Created text file : ---------------------")
+        print(contents)
+
+    def mark_processing_started(self):
+        # TODO check that the file was moved to processing dir
+        pass
+
 
 def check_imaging():
     # Discover all vs_series.dat files in the acquisition directory
@@ -434,6 +456,7 @@ def check_imaging():
                     dataset.mark_imaging_finished()
                     response = dataset.send_message('imaging_finished')
                     print(response)
+                    dataset.start_processing()
                     continue
                 has_progress = dataset.check_imaging_progress()
                 print("Imaging has progress:", has_progress)
