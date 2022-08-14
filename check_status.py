@@ -330,6 +330,7 @@ class Dataset:
             'imaging_finished': "Imaging of {} {} {} *_finished_*",
             'imaging_paused': "**WARNING:** Imaging of {} {} {} *_paused_* at z-layer {}",
             'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
+            'processing_started': "Processing of {} {} {} started",
         }
         if msg_type == 'imaging_paused':
             msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -412,15 +413,55 @@ class Dataset:
         """
         dat_file_path = Path(self.path_on_fast_store)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
-        contents = f"rootDir={str(dat_file_path.parent)}"
+        contents = f'rootDir="{str(dat_file_path.parent)}"'
         with open(txt_file_path, "w") as f:
             f.write(contents)
         print("-----------------------Created text file : ---------------------")
         print(contents)
 
+    @classmethod
+    def initialize_from_db(cls, record):
+        pi_id = record[5]
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
+        con.close()
+        if pi_name:
+            pi_name = pi_name[0]
+
+        cl_number_id = record[4]
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
+        con.close()
+
+        if cl_number:
+            cl_number = cl_number[0]
+        obj = cls(
+            db_id = record[0],
+            name = record[1],
+            path_on_fast_store = record[2],
+            cl_number = cl_number,
+            pi = pi_name,
+            imaging_status = record[6],
+            processing_status = record[7],
+            channels = record[11],
+            z_layers_total = record[12],
+            z_layers_current = record[13],
+            ribbons_total = record[14],
+            ribbons_finished = record[15],
+            imaging_no_progress_time = record[16],
+            processing_no_progress_time = record[17]
+        )
+        return obj
+
     def mark_processing_started(self):
-        # TODO check that the file was moved to processing dir
-        pass
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET processing_status = "started" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.processing_status = "started"
 
 
 def check_imaging():
@@ -486,10 +527,20 @@ def check_imaging():
 
 
 def check_processing():
-    # get all datasets, with processing other than finished
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        f'SELECT * FROM dataset WHERE processing_status="not_started" AND imaging_status="finished"'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'processing', dataset.rscm_txt_file_name)
+        if os.path.exists(txt_file_path):
+            dataset.mark_processing_started()
+            dataset.send_message('processing_started')
+
     # check if they are on the same stage or moved to the next stage
     # check if it is stuck
-    pass
 
 
 def scan():
