@@ -328,9 +328,10 @@ class Dataset:
         msg_map = {
             'imaging_started': "Imaging of {} {} {} *_started_*",
             'imaging_finished': "Imaging of {} {} {} *_finished_*",
-            'imaging_paused': "**WARNING:** Imaging of {} {} {} *_paused_* at z-layer {}",
+            'imaging_paused': "*_WARNING:_* Imaging of {} {} {} *_paused_* at z-layer {}",
             'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
+            'processing_finished': "Imaris file built for {} {} {}. Processing finished!",
         }
         if msg_type == 'imaging_paused':
             msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -455,13 +456,37 @@ class Dataset:
         )
         return obj
 
-    def mark_processing_started(self):
+    def update_path_on_hive(self, path_on_hive):
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET processing_status = "started" WHERE id={self.db_id}')
+        res = cur.execute(f'UPDATE dataset SET path_on_hive = "{path_on_hive}" WHERE id={self.db_id}')
         con.commit()
         con.close()
-        self.processing_status = "started"
+        self.path_on_hive = path_on_hive
+
+    def update_processing_status(self, processing_status):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET processing_status = "{processing_status}" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.processing_status = processing_status
+
+    def update_job_number(self, job_number):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET job_number = "{job_number}" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.job_number = job_number
+
+    def update_imaris_file_path(self, ims_file_path):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET imaris_file_path = "{ims_file_path}" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.imaris_file_path = ims_file_path
 
 
 def check_imaging():
@@ -536,11 +561,42 @@ def check_processing():
         dataset = Dataset.initialize_from_db(record)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'processing', dataset.rscm_txt_file_name)
         if os.path.exists(txt_file_path):
-            dataset.mark_processing_started()
+            dataset.update_processing_status('started')
             dataset.send_message('processing_started')
 
     # check if they are on the same stage or moved to the next stage
     # check if it is stuck
+
+    # check if processing finished (ims file is built)
+    records = cur.execute(
+        'SELECT * FROM dataset WHERE processing_status="started"'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+        path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
+        # check if path on hive exists (smth already copied) -> update db record (processing status, path on hive)
+        if os.path.exists(os.path.join(path_on_hive, 'vs_series.dat')):
+            dataset.update_path_on_hive(path_on_hive)
+            # dataset.update_processing_status('stitched')
+            composites_dir = os.path.join(path_on_hive, 'composites_RSCM_v0.1')
+            # check if job folder exists -> update db
+            job_dir = sorted(glob(os.path.join(composites_dir, 'job_*')))
+            if len(job_dir):
+                job_dir = job_dir[-1]
+                job_number = re.findall(r"\d+", os.path.basename(job_dir))[-1]
+                dataset.update_job_number(job_number)
+                # check if final ims file exists (TODO: check its size?)
+                ims_file_path = os.path.join(job_dir, f'composites_RSCM_v0.1_job_{job_number}.ims')
+                if os.path.exists(ims_file_path):
+                    # update db, send msg
+                    dataset.update_imaris_file_path(ims_file_path)
+                    dataset.update_processing_status('finished')
+                    dataset.send_message("processing_finished")
+                # check if ims file .part exists
+                elif os.path.exists(ims_file_path + '.part'):
+                    # update db
+                    # dataset.update_processing_status('denoised')
+                    pass
 
 
 def scan():
