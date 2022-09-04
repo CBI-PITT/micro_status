@@ -61,6 +61,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from imaris_ims_file_reader import ims
 
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
@@ -332,6 +333,7 @@ class Dataset:
             'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
             'processing_finished': "Imaris file built for {} {} {}. Processing finished!",
+            'broken_ims_file': "*_WARNING:_* Broken Imaris file at {} {} {}."
         }
         if msg_type == 'imaging_paused':
             msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -585,9 +587,17 @@ def check_processing():
                 job_dir = job_dir[-1]
                 job_number = re.findall(r"\d+", os.path.basename(job_dir))[-1]
                 dataset.update_job_number(job_number)
-                # check if final ims file exists (TODO: check its size?)
+                # check if final ims file exists
                 ims_file_path = os.path.join(job_dir, f'composites_RSCM_v0.1_job_{job_number}.ims')
                 if os.path.exists(ims_file_path):
+                    try:
+                        # try to open imaris file
+                        ims_file = ims(ims_file_path)
+                    except Exception as e:
+                        print("ERROR opening imaris file:", e)
+                        dataset.send_message("broken_ims_file")
+                        dataset.update_processing_status('paused')
+                        continue
                     # update db, send msg
                     dataset.update_imaris_file_path(ims_file_path)
                     dataset.update_processing_status('finished')
