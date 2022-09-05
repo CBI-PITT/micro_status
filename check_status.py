@@ -239,31 +239,6 @@ def read_dataset_record(file_path):
     return dataset
 
 
-def get_stitching_status():
-    options = webdriver.ChromeOptions()
-    options.headless = True
-    driver = webdriver.Chrome(executable_path="/home/iana/chromedriver", options=options)
-    driver.get(f'{DASK_DASHBOARD}info/main/workers.html')
-    soup = BeautifulSoup(driver.page_source)
-    trs = soup.select('tr')
-    print("------------------Workers-------------------", len(trs) - 1)
-    workers = {}
-    for tr in trs[1:]:
-        a = tr.find('td').find('a')
-        print("----------Worker--------", a.text)
-        # workers.append(a.text)
-        worker_url = a.attrs['href'].replace('../', f'{DASK_DASHBOARD}info/')
-        print("----------URL-----------", worker_url)
-        driver.get(worker_url)
-        soup = BeautifulSoup(driver.page_source)
-        tables = soup.select('table')
-        rows = tables[2].select("tr")
-        print("-----------------Tasks-----------------", len(rows) - 1)
-        workers[a.text] = len(rows) - 1
-    print("---------------------Processing summary", workers)
-
-
-
 class Found(BaseException):
     pass
 
@@ -356,11 +331,13 @@ class Dataset:
         msg_map = {
             'imaging_started': "Imaging of {} {} {} *_started_*",
             'imaging_finished': "Imaging of {} {} {} *_finished_*",
-            'imaging_paused': "*_WARNING:_* Imaging of {} {} {} *_paused_* at z-layer {}",
+            'imaging_paused': "*WARNING: Imaging of {} {} {} paused at z-layer {}*",
             'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
             'processing_finished': "Imaris file built for {} {} {}. Processing finished!",
-            'broken_ims_file': "*_WARNING:_* Broken Imaris file at {} {} {}."
+            'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
+            'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
+            'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
         }
         if msg_type == 'imaging_paused':
             msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -517,6 +494,94 @@ class Dataset:
         con.close()
         self.imaris_file_path = ims_file_path
 
+    def get_processing_summary(self):
+        processing_summary = {}
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        processing_summary_str = cur.execute(f'SELECT processing_summary FROM dataset WHERE id={self.db_id}').fetchone()
+        con.close()
+        if processing_summary_str and processing_summary_str[0] is not None:
+            processing_summary = json.loads(processing_summary_str[0])
+        return processing_summary
+
+    def update_processing_summary(self, to_update):
+        processing_summary = self.get_processing_summary()
+        print("processing_summary before:", processing_summary)
+        processing_summary.update(to_update)
+        print("processing_summary after", processing_summary)
+        processing_summary_str = json.dumps(processing_summary)
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f"UPDATE dataset SET processing_summary = '{processing_summary_str}' WHERE id={self.db_id}")
+        con.commit()
+        con.close()
+
+    def check_being_stitched(self):
+        """
+        Check if current dataset's txt file is in 'processing' dir for stitching
+        :return: bool
+        """
+        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'processing', self.rscm_txt_file_name)
+        return os.path.exists(txt_file_path)
+
+    def check_stitching_progress(self):
+        options = webdriver.ChromeOptions()
+        options.headless = True
+        driver = webdriver.Chrome(executable_path="/home/iana/chromedriver", options=options)
+        driver.get(f'{DASK_DASHBOARD}info/main/workers.html')
+        soup = BeautifulSoup(driver.page_source)
+        trs = soup.select('tr')
+        workers = {}
+        for tr in trs[1:]:
+            a = tr.find('td').find('a')
+            worker_url = a.attrs['href'].replace('../', f'{DASK_DASHBOARD}info/')
+            driver.get(worker_url)
+            soup = BeautifulSoup(driver.page_source)
+            tables = soup.select('table')
+            rows = tables[2].select("tr")
+            workers[a.text] = len(rows) - 1
+        processing_summary = self.get_processing_summary()
+        workers_previous = processing_summary.get('stitching', {})
+        has_progress = workers != workers_previous
+        if has_progress:
+            self.update_processing_summary({"stitching": workers})
+        return has_progress
+
+    def check_stitching_complete(self):
+        """
+        Check if current dataset's txt file is in 'complete' dir
+        :return: bool
+        """
+        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'complete', self.rscm_txt_file_name)
+        return os.path.exists(txt_file_path)
+
+    def check_stitching_errored(self):
+        """
+        Check if current dataset's txt file is in 'error' dir
+        :return: bool
+        """
+        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'error', self.rscm_txt_file_name)
+        return os.path.exists(txt_file_path)
+
+    def mark_has_processing_progress(self):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET processing_no_progress_time = null WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        self.processing_no_progress_time = None
+
+    def mark_no_processing_progress(self):
+        progress_stopped_at = datetime.now().strftime(DATETIME_FORMAT)
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'UPDATE dataset SET processing_no_progress_time = "{progress_stopped_at}" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.processing_no_progress_time = progress_stopped_at
+
 
 def check_imaging():
     # Discover all vs_series.dat files in the acquisition directory
@@ -559,7 +624,7 @@ def check_imaging():
                     if dataset.imaging_no_progress_time:
                         dataset.mark_has_imaging_progress()
                     continue
-                else:
+                else:  # TODO else is redundant
                     if not dataset.imaging_no_progress_time:
                         dataset.mark_no_imaging_progress()
                     else:
@@ -588,17 +653,44 @@ def check_processing():
     ).fetchall()
     for record in records:
         dataset = Dataset.initialize_from_db(record)
-        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'processing', dataset.rscm_txt_file_name)
-        if os.path.exists(txt_file_path):
+        if dataset.check_being_stitched():
             dataset.update_processing_status('started')
             dataset.send_message('processing_started')
 
     # check if they are on the same stage or moved to the next stage
     # check if it is stuck
 
-    # check if processing finished (ims file is built)
+    # check stitching
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="started"'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+        if dataset.check_stitching_complete():
+            path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
+            if os.path.exists(path_on_hive):  # copying started
+                dataset.update_processing_status('stitched')
+        elif dataset.check_stitching_errored():
+            dataset.update_processing_status('paused')
+            dataset.send_message('stitching_error')
+        elif dataset.check_being_stitched():
+            has_progress = dataset.check_stitching_progress()
+            if has_progress:
+                if dataset.processing_no_progress_time:
+                    dataset.mark_has_processing_progress()
+                continue
+            else:  # TODO else is redundant
+                if not dataset.imaging_no_progress_time:
+                    dataset.mark_no_processing_progress()
+                else:
+                    progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+                    if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                        dataset.update_processing_status('paused')
+                        dataset.send_message('stitching_stuck')
+
+    # check after stitching
+    records = cur.execute(
+        'SELECT * FROM dataset WHERE processing_status="stitched"'
     ).fetchall()
     for record in records:
         dataset = Dataset.initialize_from_db(record)
