@@ -62,6 +62,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from imaris_ims_file_reader import ims
+from selenium import webdriver
 
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
@@ -75,6 +76,7 @@ SLACK_HEADERS = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8', 
 PROGRESS_TIMEOUT = 600  # seconds
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
+DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 
 
 def check_if_new(file_path):
@@ -235,6 +237,31 @@ def read_dataset_record(file_path):
         processing_no_progress_time = record[17]
     )
     return dataset
+
+
+def get_stitching_status():
+    options = webdriver.ChromeOptions()
+    options.headless = True
+    driver = webdriver.Chrome(executable_path="/home/iana/chromedriver", options=options)
+    driver.get(f'{DASK_DASHBOARD}info/main/workers.html')
+    soup = BeautifulSoup(driver.page_source)
+    trs = soup.select('tr')
+    print("------------------Workers-------------------", len(trs) - 1)
+    workers = {}
+    for tr in trs[1:]:
+        a = tr.find('td').find('a')
+        print("----------Worker--------", a.text)
+        # workers.append(a.text)
+        worker_url = a.attrs['href'].replace('../', f'{DASK_DASHBOARD}info/')
+        print("----------URL-----------", worker_url)
+        driver.get(worker_url)
+        soup = BeautifulSoup(driver.page_source)
+        tables = soup.select('table')
+        rows = tables[2].select("tr")
+        print("-----------------Tasks-----------------", len(rows) - 1)
+        workers[a.text] = len(rows) - 1
+    print("---------------------Processing summary", workers)
+
 
 
 class Found(BaseException):
