@@ -77,6 +77,7 @@ PROGRESS_TIMEOUT = 600  # seconds
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
+CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
 
 
 def check_if_new(file_path):
@@ -527,7 +528,7 @@ class Dataset:
     def check_stitching_progress(self):
         options = webdriver.ChromeOptions()
         options.headless = True
-        driver = webdriver.Chrome(executable_path="/home/iana/chromedriver", options=options)
+        driver = webdriver.Chrome(executable_path=CHROME_DRIVER_PATH, options=options)
         driver.get(f'{DASK_DASHBOARD}info/main/workers.html')
         soup = BeautifulSoup(driver.page_source)
         trs = soup.select('tr')
