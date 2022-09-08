@@ -62,7 +62,6 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from imaris_ims_file_reader import ims
-from selenium import webdriver
 
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
@@ -526,24 +525,22 @@ class Dataset:
         return os.path.exists(txt_file_path)
 
     def check_stitching_progress(self):
-        options = webdriver.ChromeOptions()
-        options.headless = True
-        driver = webdriver.Chrome(executable_path=CHROME_DRIVER_PATH, options=options)
-        driver.get(f'{DASK_DASHBOARD}info/main/workers.html')
-        soup = BeautifulSoup(driver.page_source)
+        response = requests.get(f'{DASK_DASHBOARD}info/main/workers.html')
+        soup = BeautifulSoup(response.content)
         trs = soup.select('tr')
         workers = {}
         for tr in trs[1:]:
             a = tr.find('td').find('a')
             worker_url = a.attrs['href'].replace('../', f'{DASK_DASHBOARD}info/')
-            driver.get(worker_url)
-            soup = BeautifulSoup(driver.page_source)
+            resp = requests.get(worker_url)
+            soup = BeautifulSoup(resp.content)
             tables = soup.select('table')
             rows = tables[2].select("tr")
             workers[a.text] = len(rows) - 1
         processing_summary = self.get_processing_summary()
         workers_previous = processing_summary.get('stitching', {})
         has_progress = workers != workers_previous
+        print("---------------------------stitching has progress", has_progress)
         if has_progress:
             self.update_processing_summary({"stitching": workers})
         return has_progress
@@ -681,7 +678,7 @@ def check_processing():
                     dataset.mark_has_processing_progress()
                 continue
             else:  # TODO else is redundant
-                if not dataset.imaging_no_progress_time:
+                if not dataset.processing_no_progress_time:
                     dataset.mark_no_processing_progress()
                 else:
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
