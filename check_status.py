@@ -35,6 +35,12 @@ CLNumber:
     name
     pi = ForeignKey to PI
 
+Warning:
+    id
+    type  (low_space_hive, low_space_faststore)
+    active
+    message_sent
+
 -------------------------------------
 Messages:
     1) imaging started
@@ -45,6 +51,10 @@ Messages:
     5) processing_paused (crashed?)
     6) processing finished
 
+Other warnings:
+    1) Low space on Hive
+    2) Low space on FastStore
+
 
 pip install python-dotenv
 """
@@ -53,6 +63,7 @@ import json
 import os
 import re
 import requests
+import subprocess
 import sqlite3
 import time
 from datetime import datetime
@@ -77,6 +88,7 @@ DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
+MAX_ALLOWED_STORAGE_PERCENT = 94
 
 
 def check_if_new(file_path):
@@ -726,7 +738,142 @@ def check_processing():
                     pass
 
 
+class Warning:
+    def __init__(self, **kwargs):
+        self.type = kwargs.get('type')
+        self.active = kwargs.get('active', True)
+        self.message_sent = kwargs.get('message_sent', False)
+        self.db_id = kwargs.get('db_id')
+
+    @classmethod
+    def create(cls, warning_type):
+        warning = cls(type=warning_type)
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'INSERT OR IGNORE INTO warning(type) VALUES("{warning_type}")')
+        warning.db_id = cur.lastrowid
+        con.commit()
+        con.close()
+        return warning
+
+    @classmethod
+    def get_from_db(cls, warning_type):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'SELECT * FROM warning WHERE type = "{warning_type}"').fetchone()
+        con.close()
+        if not res:
+            return
+        warning = cls(
+            db_id=res[0],
+            type=res[1],
+            message_sent=res[2],
+            active=res[3]
+        )
+        return warning
+
+    def send_message(self):
+        msg_map = {
+            'low_space_hive': f"*WARNING: Low space on Hive (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'low_space_faststore': f"*WARNING: Low space on FastStore (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+        }
+        msg_text = msg_map[self.type]
+        payload = {
+            "channel": SLACK_CHANNEL_ID,
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": msg_text
+                    }
+                }
+            ]
+        }
+        response = requests.post(SLACK_URL, data=json.dumps(payload), headers=SLACK_HEADERS)
+        # update db
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE warning SET message_sent = 1 WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        return response
+
+    def mark_as_active(self):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE warning SET active = 1 WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+    def mark_as_inactive(self):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE warning SET active = 0 WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE warning SET message_sent = 0 WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+
+def check_storage():
+    cmd = ["df", "-h"]
+    ret = subprocess.run(cmd, capture_output=True)
+    output = ret.stdout.decode()
+    output_rows = output.split('\n')
+    beegfs_nodes = [x for x in output_rows if x.startswith('beegfs')]
+    hive = [x for x in beegfs_nodes if x.endswith('Hive')][0]
+    faststore = [x for x in beegfs_nodes if x.endswith('FastStore')][0]
+    faststore_used_percent_str = [x for x in faststore.split() if x.endswith("%")][0]
+    hive_used_percent_str = [x for x in hive.split() if x.endswith("%")][0]
+    faststore_used_percent = int(faststore_used_percent_str.replace("%", ""))
+    hive_used_percent = int(hive_used_percent_str.replace("%", ""))
+    if hive_used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
+        # if active warning exists and message sent - do nothing
+        # elif active warning exists and message not sent - send warning msg
+        # elif inactive warning exists - make warning active, send warning msg
+        # else create new active warning, send warning msg
+        warning = Warning.get_from_db('low_space_hive')
+        if warning and warning.active:
+            if not warning.message_sent:
+                warning.send_message()
+        elif warning and not warning.active:
+            warning.mark_as_active()
+            warning.send_message()
+        else:  # record doesn't exist
+            warning = Warning.create('low_space_hive')
+            warning.send_message()
+    else:
+        warning = Warning.get_from_db('low_space_hive')
+        # if active warning exists, make it inactive, make message_sent=False
+        if warning and warning.active:
+            warning.mark_as_inactive()
+        # else do nothing
+
+    if faststore_used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
+        warning = Warning.get_from_db('low_space_faststore')
+        if warning and warning.active:
+            if not warning.message_sent:
+                warning.send_message()
+        elif warning and not warning.active:
+            warning.mark_as_active()
+            warning.send_message()
+        else:  # record doesn't exist
+            warning = Warning.create('low_space_faststore')
+            warning.send_message()
+    else:
+        warning = Warning.get_from_db('low_space_faststore')
+        # if active warning exists, make it inactive, make message_sent=False
+        if warning and warning.active:
+            warning.mark_as_inactive()
+
+
 def scan():
+    check_storage()
     check_imaging()
     check_processing()
     print("========================== Waiting 30 seconds ========================")

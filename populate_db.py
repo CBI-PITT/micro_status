@@ -49,6 +49,12 @@ CREATE TABLE `dataset` (
 	FOREIGN KEY(`cl_number`) REFERENCES clnumber(id) ON DELETE SET NULL,
 	FOREIGN KEY(`pi`) REFERENCES pi(id) ON DELETE SET NULL
 );
+CREATE TABLE `warning` (
+	`id`	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+	`type`	TEXT NOT NULL,
+	`message_sent`	INTEGER DEFAULT 0,
+	`active`	INTEGER DEFAULT 1
+);
 """
 
 
