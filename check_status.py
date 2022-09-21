@@ -18,8 +18,9 @@ Dataset:
     z_layers_current
     ribbons_total
     ribbons_finished
-    imaging_no_progress_time (?)
-    processing_no_progress_time (?)
+    imaging_no_progress_time
+    processing_no_progress_time
+    z_layers_checked
 
 VSSeriesFile:
     id
@@ -89,6 +90,7 @@ RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
 MAX_ALLOWED_STORAGE_PERCENT = 94
+CHECKING_TIFFS_ENABLED = True
 
 
 def check_if_new(file_path):
@@ -267,6 +269,7 @@ class Dataset:
         self.channels = kwargs.get('channels')
         self.z_layers_total = kwargs.get('z_layers_total')
         self.z_layers_current = kwargs.get('z_layers_current')
+        self.z_layers_checked = kwargs.get('z_layers_checked')
         self.ribbons_total = kwargs.get('ribbons_total')
         self.ribbons_finished = kwargs.get('ribbons_finished')
         self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
@@ -298,6 +301,8 @@ class Dataset:
         finally:
             z_layers_current = re.findall(r"\d+", os.path.basename(subdir))[-1]
 
+        finished = ribbons_finished == self.ribbons_total
+
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET ribbons_finished = {ribbons_finished} WHERE id={self.db_id}')
@@ -308,35 +313,37 @@ class Dataset:
         res = cur.execute(f'UPDATE dataset SET z_layers_current = {z_layers_current} WHERE id={self.db_id}')
         con.commit()
         con.close()
+
         ribbons_finished_prev = self.ribbons_finished
         self.ribbons_finished = ribbons_finished
         self.z_layers_current = z_layers_current
-        return ribbons_finished > ribbons_finished_prev
+        has_progress = ribbons_finished > ribbons_finished_prev
+
+        return finished, has_progress
 
 
-    def check_imaging_finished(self):
-        # TODO: this check can be made in the above fn
-        file_path = Path(self.path_on_fast_store)
-        ribbons_finished = 0
-        subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
-        subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
-        if self.z_layers_total > 1000:
-            len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
-            len3 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 3
-            subdirs_0 = filter(len4, subdirs)
-            subdirs_1 = filter(len3, subdirs)
-            subdirs = list(subdirs_0) + list(subdirs_1)
-
-        for subdir in subdirs:
-            color_dirs = [x.path for x in os.scandir(subdir) if x.is_dir()]
-            for color_dir in color_dirs:
-                images_dir = os.path.join(color_dir, 'images')
-                ribbons = len(os.listdir(images_dir))
-                ribbons_finished += ribbons
-                if ribbons < self.ribbons_in_z_layer:
-                    break
-        return ribbons_finished == self.ribbons_total
-
+    # def check_imaging_finished(self):
+    #     # TODO: this check can be made in the above fn
+    #     file_path = Path(self.path_on_fast_store)
+    #     ribbons_finished = 0
+    #     subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
+    #     subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
+    #     if self.z_layers_total > 1000:
+    #         len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
+    #         len3 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 3
+    #         subdirs_0 = filter(len4, subdirs)
+    #         subdirs_1 = filter(len3, subdirs)
+    #         subdirs = list(subdirs_0) + list(subdirs_1)
+    #
+    #     for subdir in subdirs:
+    #         color_dirs = [x.path for x in os.scandir(subdir) if x.is_dir()]
+    #         for color_dir in color_dirs:
+    #             images_dir = os.path.join(color_dir, 'images')
+    #             ribbons = len(os.listdir(images_dir))
+    #             ribbons_finished += ribbons
+    #             if ribbons < self.ribbons_in_z_layer:
+    #                 break
+    #     return ribbons_finished == self.ribbons_total
 
     def send_message(self, msg_type):
         print("---------------------In send message------------------------")
@@ -470,7 +477,8 @@ class Dataset:
             ribbons_total = record[14],
             ribbons_finished = record[15],
             imaging_no_progress_time = record[16],
-            processing_no_progress_time = record[17]
+            processing_no_progress_time = record[17],
+            z_layers_checked = record[18]
         )
         return obj
 
@@ -620,7 +628,7 @@ def check_imaging():
                 continue
             elif dataset.imaging_status == 'in_progress':
                 print("Imaging status is 'in-progress'")
-                got_finished = dataset.check_imaging_finished()
+                got_finished, has_progress = dataset.check_imaging_progress()
                 print("Imaging finished:", got_finished)
                 if got_finished:
                     dataset.mark_imaging_finished()
@@ -628,7 +636,6 @@ def check_imaging():
                     print(response)
                     dataset.start_processing()
                     continue
-                has_progress = dataset.check_imaging_progress()
                 print("Imaging has progress:", has_progress)
                 if has_progress:
                     if dataset.imaging_no_progress_time:
