@@ -71,6 +71,7 @@ from datetime import datetime
 from glob import glob
 from pathlib import Path
 
+import tifffile
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from imaris_ims_file_reader import ims
@@ -248,7 +249,8 @@ def read_dataset_record(file_path):
         ribbons_total = record[14],
         ribbons_finished = record[15],
         imaging_no_progress_time = record[16],
-        processing_no_progress_time = record[17]
+        processing_no_progress_time = record[17],
+        z_layers_checked = record[19]
     )
     return dataset
 
@@ -274,8 +276,10 @@ class Dataset:
         self.ribbons_finished = kwargs.get('ribbons_finished')
         self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
         self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
+        self.z_layers_checked = kwargs.get('z_layers_checked')
 
     def check_imaging_progress(self):
+        error_flag = False
         file_path = Path(self.path_on_fast_store)
         ribbons_finished = 0  # TODO: optimize, start with current z layer, not mrom 0
         subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
@@ -300,6 +304,7 @@ class Dataset:
             pass
         finally:
             z_layers_current = re.findall(r"\d+", os.path.basename(subdir))[-1]
+        print("current imaging z layer :", z_layers_current)
 
         finished = ribbons_finished == self.ribbons_total
 
@@ -319,7 +324,16 @@ class Dataset:
         self.z_layers_current = z_layers_current
         has_progress = ribbons_finished > ribbons_finished_prev
 
-        return finished, has_progress
+        if CHECKING_TIFFS_ENABLED:
+            print("self.z_layers_checked", self.z_layers_checked)
+            z_start = int(self.z_layers_checked or self.z_layers_total)
+            z_stop = int(z_layers_current) if int(z_layers_current) > 0 else -1
+            bad_layer = self.check_tiffs(z_start, z_stop)
+            if bad_layer is not None:
+                error_flag = True
+                self.z_layers_current = bad_layer
+
+        return finished, has_progress, error_flag
 
 
     # def check_imaging_finished(self):
@@ -357,8 +371,9 @@ class Dataset:
             'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
+            'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*"
         }
-        if msg_type == 'imaging_paused':
+        if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
@@ -478,7 +493,7 @@ class Dataset:
             ribbons_finished = record[15],
             imaging_no_progress_time = record[16],
             processing_no_progress_time = record[17],
-            z_layers_checked = record[18]
+            z_layers_checked = record[19]
         )
         return obj
 
@@ -600,6 +615,41 @@ class Dataset:
         con.close()
         self.processing_no_progress_time = progress_stopped_at
 
+    def check_tiffs(self, z_start, z_stop):
+        """
+        z_start > z_stop, because imaging from top to bottom
+        :param z_start:
+        :param z_stop:
+        :return:
+        """
+        print("--------------------checking tiff files-----------------")
+        print("z start", z_start, "z stop", z_stop)
+        for z in range(z_start, z_stop, -1):
+            print("checking layer", z)
+            layer_dir = os.path.join(
+                str(Path(self.path_on_fast_store).parent),
+                f'{self.name.split("_stack")[0]}_layer{str(z).zfill(3) if z < 1000 else str(z)}'
+            )
+            colors = glob(os.path.join(layer_dir, '[0-9]' * 3))
+
+            for cc in colors:
+                images = glob(os.path.join(cc, 'images', '*col*.tif'))
+                print("Images:", len(images))
+
+                for image in images:
+                    try:
+                        with tifffile.TiffFile(image) as img:
+                            tag = img.pages[0]
+                    except Exception:
+                        return z
+            self.z_layers_checked = z
+            con = sqlite3.connect(DB_LOCATION)
+            cur = con.cursor()
+            res = cur.execute(
+                f'UPDATE dataset SET z_layers_checked = {z} WHERE id={self.db_id}')
+            con.commit()
+            con.close()
+
 
 def check_imaging():
     # Discover all vs_series.dat files in the acquisition directory
@@ -628,7 +678,11 @@ def check_imaging():
                 continue
             elif dataset.imaging_status == 'in_progress':
                 print("Imaging status is 'in-progress'")
-                got_finished, has_progress = dataset.check_imaging_progress()
+                got_finished, has_progress, error_flag = dataset.check_imaging_progress()
+                if error_flag:
+                    dataset.mark_paused()
+                    dataset.send_message('broken_tiff_file')
+                    continue
                 print("Imaging finished:", got_finished)
                 if got_finished:
                     dataset.mark_imaging_finished()
