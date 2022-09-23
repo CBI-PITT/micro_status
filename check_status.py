@@ -815,10 +815,10 @@ class Warning:
         msg_map = {
             'low_space_hive': f":exclamation: *WARNING: Critically low space on Hive (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
             'low_space_faststore': f":exclamation: *WARNING: Critically low space on FastStore (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
-            'threshold_0_reached_hive': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_0}% used)*",
-            'threshold_0_reached_faststore': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_0}% used)*",
-            'threshold_1_reached_hive': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_1}% used)*",
-            'threshold_1_reached_faststore': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_1}% used)*",
+            'space_hive_thr0': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_0}% used)*",
+            'space_faststore_thr0': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_0}% used)*",
+            'space_hive_thr1': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_1}% used)*",
+            'space_faststore_thr1': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_1}% used)*",
         }
         msg_text = msg_map[self.type]
         payload = {
