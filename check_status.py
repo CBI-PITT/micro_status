@@ -38,7 +38,7 @@ CLNumber:
 
 Warning:
     id
-    type  (low_space_hive, low_space_faststore)
+    type  (space_hive_thr0, space_hive_thr1, low_space_hive, space_faststore_thr0, space_faststore_thr1, low_space_faststore)
     active
     message_sent
 
@@ -91,6 +91,8 @@ RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
 MAX_ALLOWED_STORAGE_PERCENT = 94
+STORAGE_THRESHOLD_0 = 85
+STORAGE_THRESHOLD_1 = 90
 CHECKING_TIFFS_ENABLED = True
 
 
@@ -334,30 +336,6 @@ class Dataset:
                 self.z_layers_current = bad_layer
 
         return finished, has_progress, error_flag
-
-
-    # def check_imaging_finished(self):
-    #     # TODO: this check can be made in the above fn
-    #     file_path = Path(self.path_on_fast_store)
-    #     ribbons_finished = 0
-    #     subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
-    #     subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
-    #     if self.z_layers_total > 1000:
-    #         len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
-    #         len3 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 3
-    #         subdirs_0 = filter(len4, subdirs)
-    #         subdirs_1 = filter(len3, subdirs)
-    #         subdirs = list(subdirs_0) + list(subdirs_1)
-    #
-    #     for subdir in subdirs:
-    #         color_dirs = [x.path for x in os.scandir(subdir) if x.is_dir()]
-    #         for color_dir in color_dirs:
-    #             images_dir = os.path.join(color_dir, 'images')
-    #             ribbons = len(os.listdir(images_dir))
-    #             ribbons_finished += ribbons
-    #             if ribbons < self.ribbons_in_z_layer:
-    #                 break
-    #     return ribbons_finished == self.ribbons_total
 
     def send_message(self, msg_type):
         print("---------------------In send message------------------------")
@@ -835,8 +813,12 @@ class Warning:
 
     def send_message(self):
         msg_map = {
-            'low_space_hive': f"*WARNING: Low space on Hive (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
-            'low_space_faststore': f"*WARNING: Low space on FastStore (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'low_space_hive': f":exclamation: *WARNING: Critically low space on Hive (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'low_space_faststore': f":exclamation: *WARNING: Critically low space on FastStore (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'threshold_0_reached_hive': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_0}% used)*",
+            'threshold_0_reached_faststore': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_0}% used)*",
+            'threshold_1_reached_hive': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_1}% used)*",
+            'threshold_1_reached_faststore': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_1}% used)*",
         }
         msg_text = msg_map[self.type]
         payload = {
@@ -882,6 +864,64 @@ class Warning:
 
 
 def check_storage():
+    def check(used_percent, storage_unit):
+        """
+        :param used_percent:
+        :param storage_unit: "hive" or "faststore"
+        :return:
+        """
+        if used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
+            # if active warning exists and message sent - do nothing
+            # elif active warning exists and message not sent - send warning msg
+            # elif inactive warning exists - make warning active, send warning msg
+            # else create new active warning, send warning msg
+            warning = Warning.get_from_db(f'low_space_{storage_unit}')
+            if warning and warning.active:
+                if not warning.message_sent:
+                    warning.send_message()
+            elif warning and not warning.active:
+                warning.mark_as_active()
+                warning.send_message()
+            else:  # record doesn't exist
+                warning = Warning.create(f'low_space_{storage_unit}')
+                warning.send_message()
+        elif used_percent >= STORAGE_THRESHOLD_1:
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr1')
+            if warning and warning.active:
+                if not warning.message_sent:
+                    warning.send_message()
+            elif warning and not warning.active:
+                warning.mark_as_active()
+                warning.send_message()
+            else:  # record doesn't exist
+                warning = Warning.create(f'space_{storage_unit}_thr1')
+                warning.send_message()
+            # inactivate more critical warning
+            warning = Warning.get_from_db(f'low_space_{storage_unit}')
+            if warning and warning.active:
+                warning.mark_as_inactive()
+        elif used_percent >= STORAGE_THRESHOLD_0:
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr0')
+            if warning and warning.active:
+                if not warning.message_sent:
+                    warning.send_message()
+            elif warning and not warning.active:
+                warning.mark_as_active()
+                warning.send_message()
+            else:  # record doesn't exist
+                warning = Warning.create(f'space_{storage_unit}_thr0')
+                warning.send_message()
+            # inactivate more critical warning
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr1')
+            if warning and warning.active:
+                warning.mark_as_inactive()
+        else:
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr0')
+            # if active warning exists, make it inactive, make message_sent=False
+            if warning and warning.active:
+                warning.mark_as_inactive()
+            # else do nothing
+
     cmd = ["df", "-h"]
     ret = subprocess.run(cmd, capture_output=True)
     output = ret.stdout.decode()
@@ -893,44 +933,8 @@ def check_storage():
     hive_used_percent_str = [x for x in hive.split() if x.endswith("%")][0]
     faststore_used_percent = int(faststore_used_percent_str.replace("%", ""))
     hive_used_percent = int(hive_used_percent_str.replace("%", ""))
-    if hive_used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
-        # if active warning exists and message sent - do nothing
-        # elif active warning exists and message not sent - send warning msg
-        # elif inactive warning exists - make warning active, send warning msg
-        # else create new active warning, send warning msg
-        warning = Warning.get_from_db('low_space_hive')
-        if warning and warning.active:
-            if not warning.message_sent:
-                warning.send_message()
-        elif warning and not warning.active:
-            warning.mark_as_active()
-            warning.send_message()
-        else:  # record doesn't exist
-            warning = Warning.create('low_space_hive')
-            warning.send_message()
-    else:
-        warning = Warning.get_from_db('low_space_hive')
-        # if active warning exists, make it inactive, make message_sent=False
-        if warning and warning.active:
-            warning.mark_as_inactive()
-        # else do nothing
-
-    if faststore_used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
-        warning = Warning.get_from_db('low_space_faststore')
-        if warning and warning.active:
-            if not warning.message_sent:
-                warning.send_message()
-        elif warning and not warning.active:
-            warning.mark_as_active()
-            warning.send_message()
-        else:  # record doesn't exist
-            warning = Warning.create('low_space_faststore')
-            warning.send_message()
-    else:
-        warning = Warning.get_from_db('low_space_faststore')
-        # if active warning exists, make it inactive, make message_sent=False
-        if warning and warning.active:
-            warning.mark_as_inactive()
+    check(hive_used_percent, "hive")
+    check(faststore_used_percent, "faststore")
 
 
 def scan():
