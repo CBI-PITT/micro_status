@@ -69,7 +69,7 @@ import sqlite3
 import time
 from datetime import datetime
 from glob import glob
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import tifffile
 from bs4 import BeautifulSoup
@@ -345,14 +345,17 @@ class Dataset:
             'imaging_paused': "*WARNING: Imaging of {} {} {} paused at z-layer {}*",
             'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
-            'processing_finished': "Imaris file built for {} {} {}. Processing finished!",
+            'processing_finished': "Imaris file built for {} {} {}. Check it out at {}",
             'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
             'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
-            msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
+            msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
+        elif msg_type == 'processing_finished':
+            ims_folder = str(PureWindowsPath(str(Path(self.imaris_file_path).parent).replace('/CBI_Hive', 'H:')))
+            msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
         print("Message text", msg_text)
