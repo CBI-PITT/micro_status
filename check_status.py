@@ -938,9 +938,13 @@ def check_storage():
 
 
 def scan():
-    check_storage()
-    check_imaging()
-    check_processing()
+    try:
+        check_storage()
+        check_imaging()
+        check_processing()
+    except Exception as e:
+        print("\n\n!!! EXCEPTION:", e, '\n\n')
+
     print("========================== Waiting 30 seconds ========================")
     time.sleep(30)
 
