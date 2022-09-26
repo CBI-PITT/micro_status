@@ -18,8 +18,9 @@ Dataset:
     z_layers_current
     ribbons_total
     ribbons_finished
-    imaging_no_progress_time (?)
-    processing_no_progress_time (?)
+    imaging_no_progress_time
+    processing_no_progress_time
+    z_layers_checked
 
 VSSeriesFile:
     id
@@ -37,7 +38,7 @@ CLNumber:
 
 Warning:
     id
-    type  (low_space_hive, low_space_faststore)
+    type  (space_hive_thr0, space_hive_thr1, low_space_hive, space_faststore_thr0, space_faststore_thr1, low_space_faststore)
     active
     message_sent
 
@@ -68,8 +69,9 @@ import sqlite3
 import time
 from datetime import datetime
 from glob import glob
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
+import tifffile
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from imaris_ims_file_reader import ims
@@ -89,6 +91,9 @@ RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
 MAX_ALLOWED_STORAGE_PERCENT = 94
+STORAGE_THRESHOLD_0 = 85
+STORAGE_THRESHOLD_1 = 90
+CHECKING_TIFFS_ENABLED = True
 
 
 def check_if_new(file_path):
@@ -246,7 +251,8 @@ def read_dataset_record(file_path):
         ribbons_total = record[14],
         ribbons_finished = record[15],
         imaging_no_progress_time = record[16],
-        processing_no_progress_time = record[17]
+        processing_no_progress_time = record[17],
+        z_layers_checked = record[19]
     )
     return dataset
 
@@ -267,12 +273,15 @@ class Dataset:
         self.channels = kwargs.get('channels')
         self.z_layers_total = kwargs.get('z_layers_total')
         self.z_layers_current = kwargs.get('z_layers_current')
+        self.z_layers_checked = kwargs.get('z_layers_checked')
         self.ribbons_total = kwargs.get('ribbons_total')
         self.ribbons_finished = kwargs.get('ribbons_finished')
         self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
         self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
+        self.z_layers_checked = kwargs.get('z_layers_checked')
 
     def check_imaging_progress(self):
+        error_flag = False
         file_path = Path(self.path_on_fast_store)
         ribbons_finished = 0  # TODO: optimize, start with current z layer, not mrom 0
         subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
@@ -297,6 +306,9 @@ class Dataset:
             pass
         finally:
             z_layers_current = re.findall(r"\d+", os.path.basename(subdir))[-1]
+        print("current imaging z layer :", z_layers_current)
+
+        finished = ribbons_finished == self.ribbons_total
 
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
@@ -308,35 +320,22 @@ class Dataset:
         res = cur.execute(f'UPDATE dataset SET z_layers_current = {z_layers_current} WHERE id={self.db_id}')
         con.commit()
         con.close()
+
         ribbons_finished_prev = self.ribbons_finished
         self.ribbons_finished = ribbons_finished
         self.z_layers_current = z_layers_current
-        return ribbons_finished > ribbons_finished_prev
+        has_progress = ribbons_finished > ribbons_finished_prev
 
+        if CHECKING_TIFFS_ENABLED:
+            print("self.z_layers_checked", self.z_layers_checked)
+            z_start = int(self.z_layers_checked or self.z_layers_total)
+            z_stop = int(z_layers_current) if int(z_layers_current) > 0 else -1
+            bad_layer = self.check_tiffs(z_start, z_stop)
+            if bad_layer is not None:
+                error_flag = True
+                self.z_layers_current = bad_layer
 
-    def check_imaging_finished(self):
-        # TODO: this check can be made in the above fn
-        file_path = Path(self.path_on_fast_store)
-        ribbons_finished = 0
-        subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
-        subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
-        if self.z_layers_total > 1000:
-            len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
-            len3 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 3
-            subdirs_0 = filter(len4, subdirs)
-            subdirs_1 = filter(len3, subdirs)
-            subdirs = list(subdirs_0) + list(subdirs_1)
-
-        for subdir in subdirs:
-            color_dirs = [x.path for x in os.scandir(subdir) if x.is_dir()]
-            for color_dir in color_dirs:
-                images_dir = os.path.join(color_dir, 'images')
-                ribbons = len(os.listdir(images_dir))
-                ribbons_finished += ribbons
-                if ribbons < self.ribbons_in_z_layer:
-                    break
-        return ribbons_finished == self.ribbons_total
-
+        return finished, has_progress, error_flag
 
     def send_message(self, msg_type):
         print("---------------------In send message------------------------")
@@ -346,13 +345,17 @@ class Dataset:
             'imaging_paused': "*WARNING: Imaging of {} {} {} paused at z-layer {}*",
             'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
-            'processing_finished': "Imaris file built for {} {} {}. Processing finished!",
+            'processing_finished': "Imaris file built for {} {} {}. Check it out at {}",
             'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
+            'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*"
         }
-        if msg_type == 'imaging_paused':
-            msg_text = msg_map['imaging_paused'].format(self.pi, self.cl_number, self.name, self.z_layers_current)
+        if msg_type in ['imaging_paused', 'broken_tiff_file']:
+            msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
+        elif msg_type == 'processing_finished':
+            ims_folder = str(PureWindowsPath(str(Path(self.imaris_file_path).parent).replace('/CBI_Hive', 'H:')))
+            msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
         print("Message text", msg_text)
@@ -470,7 +473,8 @@ class Dataset:
             ribbons_total = record[14],
             ribbons_finished = record[15],
             imaging_no_progress_time = record[16],
-            processing_no_progress_time = record[17]
+            processing_no_progress_time = record[17],
+            z_layers_checked = record[19]
         )
         return obj
 
@@ -592,6 +596,41 @@ class Dataset:
         con.close()
         self.processing_no_progress_time = progress_stopped_at
 
+    def check_tiffs(self, z_start, z_stop):
+        """
+        z_start > z_stop, because imaging from top to bottom
+        :param z_start:
+        :param z_stop:
+        :return:
+        """
+        print("--------------------checking tiff files-----------------")
+        print("z start", z_start, "z stop", z_stop)
+        for z in range(z_start, z_stop, -1):
+            print("checking layer", z)
+            layer_dir = os.path.join(
+                str(Path(self.path_on_fast_store).parent),
+                f'{self.name.split("_stack")[0]}_layer{str(z).zfill(3) if z < 1000 else str(z)}'
+            )
+            colors = glob(os.path.join(layer_dir, '[0-9]' * 3))
+
+            for cc in colors:
+                images = glob(os.path.join(cc, 'images', '*col*.tif'))
+                print("Images:", len(images))
+
+                for image in images:
+                    try:
+                        with tifffile.TiffFile(image) as img:
+                            tag = img.pages[0]
+                    except Exception:
+                        return z
+            self.z_layers_checked = z
+            con = sqlite3.connect(DB_LOCATION)
+            cur = con.cursor()
+            res = cur.execute(
+                f'UPDATE dataset SET z_layers_checked = {z} WHERE id={self.db_id}')
+            con.commit()
+            con.close()
+
 
 def check_imaging():
     # Discover all vs_series.dat files in the acquisition directory
@@ -620,7 +659,11 @@ def check_imaging():
                 continue
             elif dataset.imaging_status == 'in_progress':
                 print("Imaging status is 'in-progress'")
-                got_finished = dataset.check_imaging_finished()
+                got_finished, has_progress, error_flag = dataset.check_imaging_progress()
+                if error_flag:
+                    dataset.mark_paused()
+                    dataset.send_message('broken_tiff_file')
+                    continue
                 print("Imaging finished:", got_finished)
                 if got_finished:
                     dataset.mark_imaging_finished()
@@ -628,7 +671,6 @@ def check_imaging():
                     print(response)
                     dataset.start_processing()
                     continue
-                has_progress = dataset.check_imaging_progress()
                 print("Imaging has progress:", has_progress)
                 if has_progress:
                     if dataset.imaging_no_progress_time:
@@ -774,8 +816,12 @@ class Warning:
 
     def send_message(self):
         msg_map = {
-            'low_space_hive': f"*WARNING: Low space on Hive (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
-            'low_space_faststore': f"*WARNING: Low space on FastStore (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'low_space_hive': f":exclamation: *WARNING: Critically low space on Hive (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'low_space_faststore': f":exclamation: *WARNING: Critically low space on FastStore (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'space_hive_thr0': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_0}% used)*",
+            'space_faststore_thr0': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_0}% used)*",
+            'space_hive_thr1': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_1}% used)*",
+            'space_faststore_thr1': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_1}% used)*",
         }
         msg_text = msg_map[self.type]
         payload = {
@@ -821,6 +867,64 @@ class Warning:
 
 
 def check_storage():
+    def check(used_percent, storage_unit):
+        """
+        :param used_percent:
+        :param storage_unit: "hive" or "faststore"
+        :return:
+        """
+        if used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
+            # if active warning exists and message sent - do nothing
+            # elif active warning exists and message not sent - send warning msg
+            # elif inactive warning exists - make warning active, send warning msg
+            # else create new active warning, send warning msg
+            warning = Warning.get_from_db(f'low_space_{storage_unit}')
+            if warning and warning.active:
+                if not warning.message_sent:
+                    warning.send_message()
+            elif warning and not warning.active:
+                warning.mark_as_active()
+                warning.send_message()
+            else:  # record doesn't exist
+                warning = Warning.create(f'low_space_{storage_unit}')
+                warning.send_message()
+        elif used_percent >= STORAGE_THRESHOLD_1:
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr1')
+            if warning and warning.active:
+                if not warning.message_sent:
+                    warning.send_message()
+            elif warning and not warning.active:
+                warning.mark_as_active()
+                warning.send_message()
+            else:  # record doesn't exist
+                warning = Warning.create(f'space_{storage_unit}_thr1')
+                warning.send_message()
+            # inactivate more critical warning
+            warning = Warning.get_from_db(f'low_space_{storage_unit}')
+            if warning and warning.active:
+                warning.mark_as_inactive()
+        elif used_percent >= STORAGE_THRESHOLD_0:
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr0')
+            if warning and warning.active:
+                if not warning.message_sent:
+                    warning.send_message()
+            elif warning and not warning.active:
+                warning.mark_as_active()
+                warning.send_message()
+            else:  # record doesn't exist
+                warning = Warning.create(f'space_{storage_unit}_thr0')
+                warning.send_message()
+            # inactivate more critical warning
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr1')
+            if warning and warning.active:
+                warning.mark_as_inactive()
+        else:
+            warning = Warning.get_from_db(f'space_{storage_unit}_thr0')
+            # if active warning exists, make it inactive, make message_sent=False
+            if warning and warning.active:
+                warning.mark_as_inactive()
+            # else do nothing
+
     cmd = ["df", "-h"]
     ret = subprocess.run(cmd, capture_output=True)
     output = ret.stdout.decode()
@@ -832,50 +936,18 @@ def check_storage():
     hive_used_percent_str = [x for x in hive.split() if x.endswith("%")][0]
     faststore_used_percent = int(faststore_used_percent_str.replace("%", ""))
     hive_used_percent = int(hive_used_percent_str.replace("%", ""))
-    if hive_used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
-        # if active warning exists and message sent - do nothing
-        # elif active warning exists and message not sent - send warning msg
-        # elif inactive warning exists - make warning active, send warning msg
-        # else create new active warning, send warning msg
-        warning = Warning.get_from_db('low_space_hive')
-        if warning and warning.active:
-            if not warning.message_sent:
-                warning.send_message()
-        elif warning and not warning.active:
-            warning.mark_as_active()
-            warning.send_message()
-        else:  # record doesn't exist
-            warning = Warning.create('low_space_hive')
-            warning.send_message()
-    else:
-        warning = Warning.get_from_db('low_space_hive')
-        # if active warning exists, make it inactive, make message_sent=False
-        if warning and warning.active:
-            warning.mark_as_inactive()
-        # else do nothing
-
-    if faststore_used_percent >= MAX_ALLOWED_STORAGE_PERCENT:
-        warning = Warning.get_from_db('low_space_faststore')
-        if warning and warning.active:
-            if not warning.message_sent:
-                warning.send_message()
-        elif warning and not warning.active:
-            warning.mark_as_active()
-            warning.send_message()
-        else:  # record doesn't exist
-            warning = Warning.create('low_space_faststore')
-            warning.send_message()
-    else:
-        warning = Warning.get_from_db('low_space_faststore')
-        # if active warning exists, make it inactive, make message_sent=False
-        if warning and warning.active:
-            warning.mark_as_inactive()
+    check(hive_used_percent, "hive")
+    check(faststore_used_percent, "faststore")
 
 
 def scan():
-    check_storage()
-    check_imaging()
-    check_processing()
+    try:
+        check_storage()
+        check_imaging()
+        check_processing()
+    except Exception as e:
+        print("\n\n!!! EXCEPTION:", e, '\n\n')
+
     print("========================== Waiting 30 seconds ========================")
     time.sleep(30)
 
