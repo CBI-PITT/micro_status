@@ -105,110 +105,110 @@ def check_if_new(file_path):
     return file_path not in vs_series_file_records
 
 
-def create_dataset_record(file_path):
-    con = sqlite3.connect(DB_LOCATION)
-    cur = con.cursor()
-    res = cur.execute(f'INSERT OR IGNORE INTO vsseriesfile(path) VALUES("{file_path}")')
-    vs_series_file_id = cur.lastrowid
-    con.commit()
-    con.close()
-
-    file_path = Path(file_path)
-    path_parts = file_path.parts
-    pi_name = path_parts[3] if path_parts[3].isalpha() else None
-    con = sqlite3.connect(DB_LOCATION)
-    cur = con.cursor()
-    res = cur.execute(f'SELECT id FROM pi WHERE name = "{pi_name}"')
-    pi_id = res.fetchone()
-    con.close()
-    if pi_id:
-        pi_id = pi_id[0]
-    else:
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'INSERT OR IGNORE INTO pi(name) VALUES("{pi_name}")')
-        pi_id = cur.lastrowid
-        con.commit()
-        con.close()
-
-    cl_number = [x for x in path_parts if 'CL' in x.upper()]
-    cl_number = None if len(cl_number) == 0 else cl_number[0]
-    con = sqlite3.connect(DB_LOCATION)
-    cur = con.cursor()
-    res = cur.execute(f'SELECT id FROM clnumber WHERE name = "{cl_number}"')
-    cl_number_id = res.fetchone()
-    con.close()
-
-    if cl_number_id:
-        cl_number_id = cl_number_id[0]
-    else:
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'INSERT OR IGNORE INTO clnumber(name, pi) VALUES("{cl_number}", {pi_id})')
-        cl_number_id = cur.lastrowid
-        con.commit()
-        con.close()
-
-    dataset_name = file_path.parent.name if "stack" in file_path.parent.name else None
-
-    print("Path", file_path, "pi_name", pi_name, "cl_number", cl_number, "dataset_name", dataset_name)
-
-    with open(file_path, 'r') as f:
-        data = f.read()
-
-    soup = BeautifulSoup(data, "xml")
-    z_layers = int(soup.find('stack_slice_count').text)
-    ribbons_in_z_layer = int(soup.find('grid_cols').text)
-    # layer_dirs = [x.path for x in os.scandir(file_path.parent) if x.is_dir()]
-    # for layer in range(int(z_layers) -1, 0, -1):
-
-    ribbons_finished = 0
-    subdirs = os.scandir(file_path.parent)
-    for subdir in subdirs:
-        if subdir.is_file() or 'layer' not in subdir.name:
-            continue
-        color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
-        channels = len(color_dirs)
-        for color_dir in color_dirs:
-            images_dir = os.path.join(color_dir, 'images')
-            ribbons = len(os.listdir(images_dir))
-            ribbons_finished += ribbons
-            if ribbons < ribbons_in_z_layer:
-                break
-    current_z_layer = re.findall(r"\d+", subdir.name)[-1]
-    # imaging_status = "finished" if current_z_layer == z_layers else "in_progress"
-    ribbons_total = z_layers * channels * ribbons_in_z_layer
-
-    con = sqlite3.connect(DB_LOCATION)
-    cur = con.cursor()
-    res = cur.execute(
-        f'''INSERT OR IGNORE INTO dataset(name, path_on_fast_store, vs_series_file, cl_number, pi, 
-imaging_status, processing_status, channels, z_layers_total, z_layers_current, ribbons_total, ribbons_finished) 
-VALUES("{dataset_name}", "{file_path}", "{vs_series_file_id}", "{cl_number_id}", "{pi_id}", 
-"in_progress", "not_started", "{channels}", "{z_layers}", "{current_z_layer}", "{ribbons_total}", "{ribbons_finished}")
-'''
-    )
-    dataset_id = cur.lastrowid
-    con.commit()
-    con.close()
-
-    dataset = Dataset(
-        db_id = dataset_id,
-        path_on_fast_store = file_path,
-        pi = pi_name,
-        cl_number = cl_number,
-        name = dataset_name,
-        imaging_status = "in_progress",
-        processing_status = "not_started",
-        channels = channels,
-        z_layers_total = z_layers,
-        ribbons_total = ribbons_total,
-        z_layers_current = z_layers - 1,
-        ribbons_finished = 0,
-        imaging_no_progress_time = None,
-        processing_no_progress_time = None
-    )
-    return dataset
+# def create_dataset_record(file_path):
+#     con = sqlite3.connect(DB_LOCATION)
+#     cur = con.cursor()
+#     res = cur.execute(f'INSERT OR IGNORE INTO vsseriesfile(path) VALUES("{file_path}")')
+#     vs_series_file_id = cur.lastrowid
+#     con.commit()
+#     con.close()
+#
+#     file_path = Path(file_path)
+#     path_parts = file_path.parts
+#     pi_name = path_parts[3] if path_parts[3].isalpha() else None
+#     con = sqlite3.connect(DB_LOCATION)
+#     cur = con.cursor()
+#     res = cur.execute(f'SELECT id FROM pi WHERE name = "{pi_name}"')
+#     pi_id = res.fetchone()
+#     con.close()
+#     if pi_id:
+#         pi_id = pi_id[0]
+#     else:
+#         con = sqlite3.connect(DB_LOCATION)
+#         cur = con.cursor()
+#         res = cur.execute(f'INSERT OR IGNORE INTO pi(name) VALUES("{pi_name}")')
+#         pi_id = cur.lastrowid
+#         con.commit()
+#         con.close()
+#
+#     cl_number = [x for x in path_parts if 'CL' in x.upper()]
+#     cl_number = None if len(cl_number) == 0 else cl_number[0]
+#     con = sqlite3.connect(DB_LOCATION)
+#     cur = con.cursor()
+#     res = cur.execute(f'SELECT id FROM clnumber WHERE name = "{cl_number}"')
+#     cl_number_id = res.fetchone()
+#     con.close()
+#
+#     if cl_number_id:
+#         cl_number_id = cl_number_id[0]
+#     else:
+#         con = sqlite3.connect(DB_LOCATION)
+#         cur = con.cursor()
+#         res = cur.execute(f'INSERT OR IGNORE INTO clnumber(name, pi) VALUES("{cl_number}", {pi_id})')
+#         cl_number_id = cur.lastrowid
+#         con.commit()
+#         con.close()
+#
+#     dataset_name = file_path.parent.name if "stack" in file_path.parent.name else None
+#
+#     print("Path", file_path, "pi_name", pi_name, "cl_number", cl_number, "dataset_name", dataset_name)
+#
+#     with open(file_path, 'r') as f:
+#         data = f.read()
+#
+#     soup = BeautifulSoup(data, "xml")
+#     z_layers = int(soup.find('stack_slice_count').text)
+#     ribbons_in_z_layer = int(soup.find('grid_cols').text)
+#     # layer_dirs = [x.path for x in os.scandir(file_path.parent) if x.is_dir()]
+#     # for layer in range(int(z_layers) -1, 0, -1):
+#
+#     ribbons_finished = 0
+#     subdirs = os.scandir(file_path.parent)
+#     for subdir in subdirs:
+#         if subdir.is_file() or 'layer' not in subdir.name:
+#             continue
+#         color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
+#         channels = len(color_dirs)
+#         for color_dir in color_dirs:
+#             images_dir = os.path.join(color_dir, 'images')
+#             ribbons = len(os.listdir(images_dir))
+#             ribbons_finished += ribbons
+#             if ribbons < ribbons_in_z_layer:
+#                 break
+#     current_z_layer = re.findall(r"\d+", subdir.name)[-1]
+#     # imaging_status = "finished" if current_z_layer == z_layers else "in_progress"
+#     ribbons_total = z_layers * channels * ribbons_in_z_layer
+#
+#     con = sqlite3.connect(DB_LOCATION)
+#     cur = con.cursor()
+#     res = cur.execute(
+#         f'''INSERT OR IGNORE INTO dataset(name, path_on_fast_store, vs_series_file, cl_number, pi,
+# imaging_status, processing_status, channels, z_layers_total, z_layers_current, ribbons_total, ribbons_finished)
+# VALUES("{dataset_name}", "{file_path}", "{vs_series_file_id}", "{cl_number_id}", "{pi_id}",
+# "in_progress", "not_started", "{channels}", "{z_layers}", "{current_z_layer}", "{ribbons_total}", "{ribbons_finished}")
+# '''
+#     )
+#     dataset_id = cur.lastrowid
+#     con.commit()
+#     con.close()
+#
+#     dataset = Dataset(
+#         db_id = dataset_id,
+#         path_on_fast_store = file_path,
+#         pi = pi_name,
+#         cl_number = cl_number,
+#         name = dataset_name,
+#         imaging_status = "in_progress",
+#         processing_status = "not_started",
+#         channels = channels,
+#         z_layers_total = z_layers,
+#         ribbons_total = ribbons_total,
+#         z_layers_current = z_layers - 1,
+#         ribbons_finished = 0,
+#         imaging_no_progress_time = None,
+#         processing_no_progress_time = None
+#     )
+#     return dataset
 
 
 def read_dataset_record(file_path):
@@ -280,6 +280,113 @@ class Dataset:
         self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
         self.z_layers_checked = kwargs.get('z_layers_checked')
 
+    @classmethod
+    def create(cls, file_path):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'INSERT OR IGNORE INTO vsseriesfile(path) VALUES("{file_path}")')
+        vs_series_file_id = cur.lastrowid
+        con.commit()
+        con.close()
+
+        file_path = Path(file_path)
+        path_parts = file_path.parts
+        last_name_pattern = r"^[A-Za-z '-]+$"
+        pi_name = path_parts[3] if re.findall(last_name_pattern, path_parts[3]) else None
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'SELECT id FROM pi WHERE name = "{pi_name}"')
+        pi_id = res.fetchone()
+        con.close()
+        if pi_id:
+            pi_id = pi_id[0]
+        else:
+            con = sqlite3.connect(DB_LOCATION)
+            cur = con.cursor()
+            res = cur.execute(f'INSERT OR IGNORE INTO pi(name) VALUES("{pi_name}")')
+            pi_id = cur.lastrowid
+            con.commit()
+            con.close()
+
+        cl_number = [x for x in path_parts if 'CL' in x.upper()]
+        cl_number = None if len(cl_number) == 0 else cl_number[0]
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'SELECT id FROM clnumber WHERE name = "{cl_number}"')
+        cl_number_id = res.fetchone()
+        con.close()
+
+        if cl_number_id:
+            cl_number_id = cl_number_id[0]
+        else:
+            con = sqlite3.connect(DB_LOCATION)
+            cur = con.cursor()
+            res = cur.execute(f'INSERT OR IGNORE INTO clnumber(name, pi) VALUES("{cl_number}", {pi_id})')
+            cl_number_id = cur.lastrowid
+            con.commit()
+            con.close()
+
+        dataset_name = file_path.parent.name if "stack" in file_path.parent.name else None
+
+        print("Path", file_path, "pi_name", pi_name, "cl_number", cl_number, "dataset_name", dataset_name)
+
+        with open(file_path, 'r') as f:
+            data = f.read()
+
+        soup = BeautifulSoup(data, "xml")
+        z_layers = int(soup.find('stack_slice_count').text)
+        ribbons_in_z_layer = int(soup.find('grid_cols').text)
+        # layer_dirs = [x.path for x in os.scandir(file_path.parent) if x.is_dir()]
+        # for layer in range(int(z_layers) -1, 0, -1):
+
+        ribbons_finished = 0
+        subdirs = os.scandir(file_path.parent)
+        for subdir in subdirs:
+            if subdir.is_file() or 'layer' not in subdir.name:
+                continue
+            color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
+            channels = len(color_dirs)
+            for color_dir in color_dirs:
+                images_dir = os.path.join(color_dir, 'images')
+                ribbons = len(os.listdir(images_dir))
+                ribbons_finished += ribbons
+                if ribbons < ribbons_in_z_layer:
+                    break
+        current_z_layer = re.findall(r"\d+", subdir.name)[-1]
+        # imaging_status = "finished" if current_z_layer == z_layers else "in_progress"
+        ribbons_total = z_layers * channels * ribbons_in_z_layer
+
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'''INSERT OR IGNORE INTO dataset(name, path_on_fast_store, vs_series_file, cl_number, pi, 
+        imaging_status, processing_status, channels, z_layers_total, z_layers_current, ribbons_total, ribbons_finished) 
+        VALUES("{dataset_name}", "{file_path}", "{vs_series_file_id}", "{cl_number_id}", "{pi_id}", 
+        "in_progress", "not_started", "{channels}", "{z_layers}", "{current_z_layer}", "{ribbons_total}", "{ribbons_finished}")
+        '''
+        )
+        dataset_id = cur.lastrowid
+        con.commit()
+        con.close()
+
+        dataset = cls(
+            db_id=dataset_id,
+            path_on_fast_store=file_path,
+            pi=pi_name,
+            cl_number=cl_number,
+            name=dataset_name,
+            imaging_status="in_progress",
+            processing_status="not_started",
+            channels=channels,
+            z_layers_total=z_layers,
+            ribbons_total=ribbons_total,
+            z_layers_current=z_layers - 1,
+            ribbons_finished=0,
+            imaging_no_progress_time=None,
+            processing_no_progress_time=None
+        )
+        return dataset
+
     def check_imaging_progress(self):
         error_flag = False
         file_path = Path(self.path_on_fast_store)
@@ -343,7 +450,7 @@ class Dataset:
             'imaging_started': "Imaging of {} {} {} *_started_*",
             'imaging_finished': "Imaging of {} {} {} *_finished_*",
             'imaging_paused': "*WARNING: Imaging of {} {} {} paused at z-layer {}*",
-            'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
+            # 'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
             'processing_finished': "Imaris file built for {} {} {}. Check it out at {}",
             'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
@@ -649,9 +756,9 @@ def check_imaging():
         is_new = check_if_new(file_path)
         if is_new:
             print("-----------------------New dataset--------------------------")
-            dataset = create_dataset_record(file_path)
-            response = dataset.send_message('imaging_started')
-            print(response)
+            dataset = Dataset.create(file_path)
+            dataset.send_message('imaging_started')
+            # print(response)
         else:
             dataset = read_dataset_record(file_path)
             if not dataset or dataset.imaging_status == 'finished':
@@ -693,7 +800,7 @@ def check_imaging():
                 else:
                     dataset.mark_has_imaging_progress()
                     dataset.mark_resumed()
-                    response = dataset.send_message('imaging_resumed')
+                    # response = dataset.send_message('imaging_resumed')
                     print(response)
 
 
