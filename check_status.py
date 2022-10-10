@@ -435,8 +435,14 @@ class Dataset:
 
         if CHECKING_TIFFS_ENABLED:
             print("self.z_layers_checked", self.z_layers_checked)
-            z_start = int(self.z_layers_checked or self.z_layers_total)
-            z_stop = int(z_layers_current) if int(z_layers_current) > 0 else -1
+            if finished:  # only check layer 0 (last layer)
+                z_start = 0
+                z_stop = -1
+                time.sleep(10)  # wait, in case if last image is still being saved
+            else:
+                z_start = int((self.z_layers_checked - 1) or self.z_layers_total)
+                z_stop = int(z_layers_current)
+
             bad_layer = self.check_tiffs(z_start, z_stop)
             if bad_layer is not None:
                 error_flag = True
@@ -801,7 +807,7 @@ def check_imaging():
                     dataset.mark_has_imaging_progress()
                     dataset.mark_resumed()
                     # response = dataset.send_message('imaging_resumed')
-                    print(response)
+                    # print(response)
 
 
 def check_processing():
