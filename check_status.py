@@ -332,12 +332,12 @@ class Dataset:
             if finished:  # only check layer 0 (last layer)
                 z_start = 0
                 z_stop = -1
-                time.sleep(10)  # wait, in case if last image is still being saved
             else:
                 z_start = int((self.z_layers_checked - 1) if self.z_layers_checked is not None else self.z_layers_total)
                 # z_start = int((self.z_layers_checked or self.z_layers_total) - 1)
                 z_stop = int(z_layers_current)
 
+            time.sleep(10)  # wait, in case if last image is still being saved
             bad_layer = self.check_tiffs(z_start, z_stop)
             if bad_layer is not None:
                 error_flag = True
