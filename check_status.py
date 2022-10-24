@@ -21,6 +21,7 @@ Dataset:
     imaging_no_progress_time
     processing_no_progress_time
     z_layers_checked
+    keep_composites
 
 VSSeriesFile:
     id
@@ -146,7 +147,8 @@ def read_dataset_record(file_path):
         ribbons_finished = record[15],
         imaging_no_progress_time = record[16],
         processing_no_progress_time = record[17],
-        z_layers_checked = record[19]
+        z_layers_checked = record[19],
+        keep_composites = record[20]
     )
     return dataset
 
@@ -173,6 +175,7 @@ class Dataset:
         self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
         self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
         self.z_layers_checked = kwargs.get('z_layers_checked')
+        self.keep_composites = kwargs.get('keep_composites')
 
     @classmethod
     def create(cls, file_path):
@@ -277,7 +280,8 @@ class Dataset:
             z_layers_current=z_layers - 1,
             ribbons_finished=0,
             imaging_no_progress_time=None,
-            processing_no_progress_time=None
+            processing_no_progress_time=None,
+            keep_composites=0
         )
         return dataset
 
@@ -443,11 +447,19 @@ class Dataset:
         """
         dat_file_path = Path(self.path_on_fast_store)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
-        contents = f'rootDir="{str(dat_file_path.parent)}"'
+        contents = f'rootDir="{str(dat_file_path.parent)}"\nkeepComposites=True'
         with open(txt_file_path, "w") as f:
             f.write(contents)
         print("-----------------------Created text file : ---------------------")
         print(contents)
+
+    def clean_up_composites(self):
+        if self.path_on_hive and self.imaris_file_path:
+            denoised_composites = sorted(glob(os.path.join(os.path.dirname(self.imaris_file_path), 'composite_*.tif')))
+            raw_composites = sorted(glob(os.path.join(self.path_on_hive, "composites_RSCM_v0.1", 'composite_*.tif')))
+            for f in denoised_composites + raw_composites:
+                print("Will remove", f)
+                # os.remove(f)
 
     @classmethod
     def initialize_from_db(cls, record):
@@ -482,7 +494,8 @@ class Dataset:
             ribbons_finished = record[15],
             imaging_no_progress_time = record[16],
             processing_no_progress_time = record[17],
-            z_layers_checked = record[19]
+            z_layers_checked = record[19],
+            keep_composites = record[20]
         )
         return obj
 
@@ -779,6 +792,8 @@ def check_processing():
                         continue
                     # update db, send msg
                     dataset.update_imaris_file_path(ims_file_path)
+                    if not dataset.keep_composites:
+                        dataset.clean_up_composites()
                     dataset.update_processing_status('finished')
                     dataset.send_message("processing_finished")
                 # check if ims file .part exists

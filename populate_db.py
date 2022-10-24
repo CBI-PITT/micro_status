@@ -45,10 +45,14 @@ CREATE TABLE `dataset` (
 	`ribbons_finished`	INTEGER,
 	`imaging_no_progress_time`	TEXT,
 	`processing_no_progress_time`	TEXT,
-	FOREIGN KEY(`vs_series_file`) REFERENCES vsseriesfile(id) ON DELETE SET NULL,
-	FOREIGN KEY(`cl_number`) REFERENCES clnumber(id) ON DELETE SET NULL,
-	FOREIGN KEY(`pi`) REFERENCES pi(id) ON DELETE SET NULL
+	`processing_summary`	TEXT,
+	`z_layers_checked`	INTEGER,
+	`keep_composites`	INTEGER DEFAULT 0,
+	FOREIGN KEY(`vs_series_file`) REFERENCES vsseriesfile ( id ) ON DELETE SET NULL,
+	FOREIGN KEY(`cl_number`) REFERENCES clnumber ( id ) ON DELETE SET NULL,
+	FOREIGN KEY(`pi`) REFERENCES pi ( id ) ON DELETE SET NULL
 );
+
 CREATE TABLE `warning` (
 	`id`	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 	`type`	TEXT NOT NULL,
