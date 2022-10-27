@@ -9,7 +9,7 @@ Dataset:
     cl_number - ForeignKey to CLNumber
     pi - ForeignKey to PI
     imaging_status (in_progress, paused, finished)
-    processing_status (not_started, started, stitched, copied_to_hive, denoised, built_ims, finished)
+    processing_status (not_started, started, stitched, moved_to_hive, denoised, built_ims, finished)
     path_on_hive
     job_number
     imaris_file_path
@@ -652,6 +652,15 @@ class Dataset:
             con.commit()
             con.close()
 
+    def check_all_ribbons_present(self):
+        pass
+
+    def check_all_raw_composites_present(self):
+        pass
+
+    def check_denoising_started(self):
+        pass
+
 
 def check_imaging():
     # Discover all vs_series.dat files in the acquisition directory
@@ -761,12 +770,46 @@ def check_processing():
                         dataset.update_processing_status('paused')
                         dataset.send_message('stitching_stuck')
 
-    # check after stitching
+    # check moving to hive
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="stitched"'
     ).fetchall()
     for record in records:
         dataset = Dataset.initialize_from_db(record)
+        all_ribbons_present = dataset.check_all_ribbons_present()
+        all_raw_composites_present = dataset.check_all_raw_composites_present()
+        denoising_started = dataset.check_denoising_started()
+        if all_ribbons_present and all_raw_composites_present and denoising_started and not os.path.exists(
+            dataset.path_on_fast_store
+        ):
+            dataset.update_processing_status('moved_to_hive')
+        else:
+            dataset.check_moving_to_hive_progress()
+        # TODO: check all files are there
+        # TODO: check folder from FastStore got deleted
+        # TODO: check denoising started
+        # TODO: otherwise, check progress
+        # TODO: Update db to "moved_to_hive" status
+
+    # check denoising
+    records = cur.execute(
+        'SELECT * FROM dataset WHERE processing_status="moved_to_hive"'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+
+        # TODO: check whether all composites are in the denoised folder
+        # TODO: otherwise, check that there's progress in denoising
+        # TODO: check ims.part file appeared
+
+    # check building imaris file
+    records = cur.execute(
+        'SELECT * FROM dataset WHERE processing_status="denoised"'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+        # TODO: check whether ims file is there and it opens
+        # TODO: otherwise, check there's progress (size of ims.part increased)
         path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
         # check if path on hive exists (smth already copied) -> update db record (processing status, path on hive)
         if os.path.exists(os.path.join(path_on_hive, 'vs_series.dat')):
@@ -789,6 +832,7 @@ def check_processing():
                         print("ERROR opening imaris file:", e)
                         dataset.send_message("broken_ims_file")
                         dataset.update_processing_status('paused')
+                        # TODO: delete job# and path to imaris file
                         continue
                     # update db, send msg
                     dataset.update_imaris_file_path(ims_file_path)
@@ -968,6 +1012,7 @@ def scan():
         check_storage()
         check_imaging()
         check_processing()
+        # TODO db_cleanup()
     except Exception as e:
         print("\n\n!!! EXCEPTION:", e, '\n\n')
 
