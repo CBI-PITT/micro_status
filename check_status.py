@@ -80,7 +80,7 @@ from imaris_ims_file_reader import ims
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
 HIVE_ACQUISITION_FOLDER = "/CBI_Hive/Acquire"
-DB_LOCATION = "/CBI_Hive/CBI/Iana/projects/internal/RSCM_datasets"
+DB_LOCATION = "/CBI_FastStore/Iana/RSCM_datasets.db"
 
 SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()
