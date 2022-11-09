@@ -95,6 +95,16 @@ MAX_ALLOWED_STORAGE_PERCENT = 94
 STORAGE_THRESHOLD_0 = 85
 STORAGE_THRESHOLD_1 = 90
 CHECKING_TIFFS_ENABLED = True
+WHERE_PROCESSING_HAPPENS = {
+    'stitch': 'faststore',
+    'build_composites': 'faststore',
+    'denoise': 'faststore',
+    'build_ims': 'faststore'
+}
+DATA_LOCATION = {
+    'faststore': FASTSTORE_ACQUISITION_FOLDER,
+    'hive': HIVE_ACQUISITION_FOLDER
+}
 
 
 def check_if_new(file_path):
@@ -361,6 +371,7 @@ class Dataset:
             'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
+            'denoising_stuck': "*WARNING: Denoising of {} {} {} could be stuck. Check CBPy.*",
             'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
@@ -652,14 +663,56 @@ class Dataset:
             con.commit()
             con.close()
 
-    def check_all_ribbons_present(self):
-        pass
+    @property
+    def composites_dir(self):
+        data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_composites']]
+        raw_data_dir = os.path.join(data_location, dataset.pi, dataset.cl_number, dataset.name)
+        return os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
+
+    @property
+    def job_dir(self):
+        data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['denoise']]
+        raw_data_dir = os.path.join(data_location, dataset.pi, dataset.cl_number, dataset.name)
+        composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
+        job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+        return job_dirs[-1] if len(job_dirs) else None
 
     def check_all_raw_composites_present(self):
-        pass
+        # TODO use this method in check_processing
+        expected_composites = self.z_layers_total * self.channels
+        actual_composites = len(glob(os.path.join(self.composites_dir, 'composite*.tif')))
+        return expected_composites == actual_composites
 
-    def check_denoising_started(self):
-        pass
+    def check_all_raw_composites_same_size(self):
+        # TODO use this method in check_processing
+        files = sorted(glob(os.path.join(self.composites_dir, 'composite*.tif')))
+        composite_sizes = [os.path.getsize(x) for x in files]
+        return len(set(composite_sizes)) == 1
+
+    def check_all_denoised_composites_present(self):
+        expected_composites = self.z_layers_total * self.channels
+        actual_composites = len(glob(os.path.join(self.job_dir, 'composite*.tif')))
+        return expected_composites == actual_composites
+
+    def check_all_denoised_composites_same_size(self):
+        files = sorted(glob(os.path.join(self.job_dir, 'composite*.tif')))
+        composite_sizes = [os.path.getsize(x) for x in files]
+        return len(set(composite_sizes)) == 1
+
+    def check_denoising_progress(self):
+        all_denoised_composites_present = self.check_all_denoised_composites_present()
+        all_denoised_composites_same_size = self.check_all_denoised_composites_same_size()
+        denoising_finished = all_denoised_composites_present and all_denoised_composites_same_size
+        if denoising_finished:
+            return True, True
+        processing_summary = self.get_processing_summary()
+        denoising_summary = processing_summary.get('denoising', {})
+        previous_denoised_composites = denoising_summary.get('denoised_composites', 0)
+        denoised_composites = len(glob(os.path.join(self.job_dir, 'composite*.tif')))
+        denoising_has_progress = denoised_composites > previous_denoised_composites
+        if denoising_has_progress:
+            self.update_processing_summary({"denoising": {"denoised_composites": denoised_composites}})
+        return denoising_finished, denoising_has_progress
 
 
 def check_imaging():
@@ -717,7 +770,7 @@ def check_imaging():
                             print(response)
             elif dataset.imaging_status == 'paused':
                 print("Imaging status is 'paused'")
-                has_progress = dataset.check_imaging_progress()  # maybe imaging resumed
+                finished, has_progress, error_flag = dataset.check_imaging_progress()  # maybe imaging resumed
                 if not has_progress:
                     continue
                 else:
@@ -774,33 +827,54 @@ def check_processing():
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="stitched"'
     ).fetchall()
+
+    # for record in records:
+    #     dataset = Dataset.initialize_from_db(record)
+    #     all_ribbons_present = dataset.check_all_ribbons_present()
+    #     all_raw_composites_present = dataset.check_all_raw_composites_present()
+    #     denoising_started = dataset.check_denoising_started()
+    #     if all_ribbons_present and all_raw_composites_present and denoising_started and not os.path.exists(
+    #         dataset.path_on_fast_store
+    #     ):
+    #         dataset.update_processing_status('moved_to_hive')
+    #     else:
+    #         dataset.check_moving_to_hive_progress()
+    #     # TODO: check all files are there
+    #     # TODO: check folder from FastStore got deleted
+    #     # TODO: check denoising started
+    #     # TODO: otherwise, check progress
+    #     # TODO: Update db to "moved_to_hive" status
+    #
+    # # check denoising
+    # records = cur.execute(
+    #     'SELECT * FROM dataset WHERE processing_status="moved_to_hive"'
+    # ).fetchall()
+
     for record in records:
         dataset = Dataset.initialize_from_db(record)
-        all_ribbons_present = dataset.check_all_ribbons_present()
-        all_raw_composites_present = dataset.check_all_raw_composites_present()
-        denoising_started = dataset.check_denoising_started()
-        if all_ribbons_present and all_raw_composites_present and denoising_started and not os.path.exists(
-            dataset.path_on_fast_store
-        ):
-            dataset.update_processing_status('moved_to_hive')
-        else:
-            dataset.check_moving_to_hive_progress()
-        # TODO: check all files are there
-        # TODO: check folder from FastStore got deleted
-        # TODO: check denoising started
-        # TODO: otherwise, check progress
-        # TODO: Update db to "moved_to_hive" status
 
-    # check denoising
-    records = cur.execute(
-        'SELECT * FROM dataset WHERE processing_status="moved_to_hive"'
-    ).fetchall()
-    for record in records:
-        dataset = Dataset.initialize_from_db(record)
-
-        # TODO: check whether all composites are in the denoised folder
-        # TODO: otherwise, check that there's progress in denoising
-        # TODO: check ims.part file appeared
+        if dataset.job_dir:
+            job_number = re.findall(r"\d+", os.path.basename(dataset.job_dir))[-1]
+            dataset.update_job_number(job_number)
+            denoising_started = len(glob(os.path.join(dataset.job_dir, "composite*.tif"))) > 0
+            if not denoising_started:
+                continue
+            denoising_finished, denoising_has_progress = dataset.check_denoising_progress()
+            if denoising_finished:
+                dataset.update_processing_status('denoised')
+                continue
+            if denoising_has_progress:
+                if dataset.processing_no_progress_time:
+                    dataset.mark_has_processing_progress()
+                continue
+            else:
+                if not dataset.processing_no_progress_time:
+                    dataset.mark_no_processing_progress()
+                else:
+                    progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+                    if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                        dataset.update_processing_status('paused')
+                        dataset.send_message('denoising_stuck')
 
     # check building imaris file
     records = cur.execute(
