@@ -22,6 +22,7 @@ Dataset:
     processing_no_progress_time
     z_layers_checked
     keep_composites
+    delete_405
 
 VSSeriesFile:
     id
@@ -158,7 +159,8 @@ def read_dataset_record(file_path):
         imaging_no_progress_time = record[16],
         processing_no_progress_time = record[17],
         z_layers_checked = record[19],
-        keep_composites = record[20]
+        keep_composites = record[20],
+        delete_405 = record[21]
     )
     return dataset
 
@@ -186,6 +188,7 @@ class Dataset:
         self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
         self.z_layers_checked = kwargs.get('z_layers_checked')
         self.keep_composites = kwargs.get('keep_composites')
+        self.delete_405 = kwargs.get('delete_405')
 
     @classmethod
     def create(cls, file_path):
@@ -291,7 +294,8 @@ class Dataset:
             ribbons_finished=0,
             imaging_no_progress_time=None,
             processing_no_progress_time=None,
-            keep_composites=0
+            keep_composites=0,
+            delete_405=0
         )
         return dataset
 
@@ -341,7 +345,7 @@ class Dataset:
         self.z_layers_current = z_layers_current
         has_progress = ribbons_finished > ribbons_finished_prev
 
-        if CHECKING_TIFFS_ENABLED:
+        if CHECKING_TIFFS_ENABLED and self.imaging_status == "in_progress":
             print("self.z_layers_checked", self.z_layers_checked)
             if finished:  # only check layer 0 (last layer)
                 z_start = 0
@@ -506,7 +510,8 @@ class Dataset:
             imaging_no_progress_time = record[16],
             processing_no_progress_time = record[17],
             z_layers_checked = record[19],
-            keep_composites = record[20]
+            keep_composites = record[20],
+            delete_405 = record[21]
         )
         return obj
 
@@ -714,6 +719,16 @@ class Dataset:
             self.update_processing_summary({"denoising": {"denoised_composites": denoised_composites}})
         return denoising_finished, denoising_has_progress
 
+    def delete_channel_405(self):
+        color = '405'
+        rootDir = os.path.join(FASTSTORE_ACQUISITION_FOLDER, self.pi, self.cl_number, self.name)  # build path like this for safety reasons
+        assert len(rootDir) > (len(FASTSTORE_ACQUISITION_FOLDER) + 1)  # for safety reasons
+        print("Removing color 405 in folder", rootDir)
+        a = sorted(glob(os.path.join(rootDir, '**', color + '*')))
+        print("Will remove folders:")
+        print(*list(a), sep="\n")
+        # z = [shutil.rmtree(x) for x in a]
+
 
 def check_imaging():
     # Discover all vs_series.dat files in the acquisition directory
@@ -750,8 +765,10 @@ def check_imaging():
                 print("Imaging finished:", got_finished)
                 if got_finished:
                     dataset.mark_imaging_finished()
-                    response = dataset.send_message('imaging_finished')
-                    print(response)
+                    dataset.send_message('imaging_finished')
+                    if dataset.delete_405:
+                        print("------------Deleting 405 channel")
+                        dataset.delete_channel_405()
                     dataset.start_processing()
                     continue
                 print("Imaging has progress:", has_progress)

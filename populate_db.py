@@ -26,7 +26,7 @@ CREATE TABLE "vsseriesfile" (
 	`path`	TEXT NOT NULL UNIQUE
 )
 
-CREATE TABLE `dataset` (
+CREATE TABLE "dataset" (
 	`id`	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 	`name`	TEXT,
 	`path_on_fast_store`	TEXT,
@@ -48,10 +48,11 @@ CREATE TABLE `dataset` (
 	`processing_summary`	TEXT,
 	`z_layers_checked`	INTEGER,
 	`keep_composites`	INTEGER DEFAULT 0,
+	`delete_405`	INTEGER DEFAULT 0,
 	FOREIGN KEY(`vs_series_file`) REFERENCES vsseriesfile ( id ) ON DELETE SET NULL,
 	FOREIGN KEY(`cl_number`) REFERENCES clnumber ( id ) ON DELETE SET NULL,
 	FOREIGN KEY(`pi`) REFERENCES pi ( id ) ON DELETE SET NULL
-);
+)
 
 CREATE TABLE `warning` (
 	`id`	INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
