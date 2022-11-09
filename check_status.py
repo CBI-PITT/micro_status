@@ -81,11 +81,11 @@ from imaris_ims_file_reader import ims
 
 console_handler = logging.StreamHandler()
 LOG_FILE_NAME_PATTERN = "/CBI_FastStore/Iana/bot_logs/{}_{}.txt"
-TIMESTAMP_FORAMT = '%Y-%m-%d_%H:%M:%S'
+DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 file_handler = logging.FileHandler(
     LOG_FILE_NAME_PATTERN.format(
         os.uname().nodename,
-        datetime.now().strftime(TIMESTAMP_FORAMT)
+        datetime.now().strftime(DATETIME_FORMAT)
     )
 )
 logging.basicConfig(
@@ -105,8 +105,8 @@ load_dotenv()
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL")
 SLACK_HEADERS = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8', 'Authorization': f'Bearer {os.getenv("SLACK_TOKEN")}'}
 PROGRESS_TIMEOUT = 600  # seconds
-DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
+RSCM_FOLDER_BUILDING_IMS = "/CBI_FastStore/clusterStitch"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
 MAX_ALLOWED_STORAGE_PERCENT = 94
@@ -393,6 +393,7 @@ class Dataset:
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
             'denoising_stuck': "*WARNING: Denoising of {} {} {} could be stuck. Check CBPy.*",
+            'ims_build_stuck': "*WARNING: Building of Imaris file for {} {} {} could be stuck. Check conversion tool.*",
             'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
@@ -688,17 +689,36 @@ class Dataset:
 
     @property
     def composites_dir(self):
+        """
+        At the time of building composites
+        """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_composites']]
-        raw_data_dir = os.path.join(data_location, dataset.pi, dataset.cl_number, dataset.name)
+        raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         return os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
 
     @property
     def job_dir(self):
+        """
+        At the time of denoising
+        """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['denoise']]
-        raw_data_dir = os.path.join(data_location, dataset.pi, dataset.cl_number, dataset.name)
+        raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
         job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
         return job_dirs[-1] if len(job_dirs) else None
+
+    @property
+    def imaris_file_name(self):
+        return f"composites_RSCM_v0.1_job_{self.job_number}.ims"
+
+    @property
+    def full_path_to_imaris_file(self):
+        """
+        At the time of building ims
+        """
+        data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_ims']]
+        folder = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1', f"job_{self.job_number}")
+        return os.path.join(folder, self.imaris_file_name)
 
     def check_all_raw_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
@@ -744,6 +764,49 @@ class Dataset:
         log.info("Will remove folders:")
         log.info("\n".join(list(a)))
         # z = [shutil.rmtree(x) for x in a]
+
+    def check_ims_building_progress(self):
+        processing_summary = self.get_processing_summary()
+        previous_ims_size = processing_summary.get('building_ims', {}).get('ims_size', 0)
+        current_ims_size = os.path.getsize(self.full_path_to_imaris_file)
+        has_progress = current_ims_size > previous_ims_size
+        if has_progress:
+            value_from_db = processing_summary.get('building_ims')
+            if value_from_db:
+                value_from_db.update({'ims_size': current_ims_size})
+                self.update_processing_summary({'building_ims': value_from_db})
+            else:
+                self.update_processing_summary({'building_ims': {'ims_size': current_ims_size}})
+        return has_progress
+
+    @property
+    def imsqueue_file_name(self):
+        return f"job_{self.job_number}.txt.imsqueue"
+
+    def check_ims_converter_works(self):
+        currently_building = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', '*.imsqueue'))
+        if len(currently_building):
+            currently_building = currently_building[0]
+        else:
+            return False
+        with open(currently_building, 'r') as f:
+            content = f.readlines()
+            if len(content) and len(content[0].split('"')):
+                ims_dir = content[0].split('"')[1]
+                ims_path = os.path.join(ims_dir, f"composites_RSCM_v0.1_{ims_dir.split(os.path.sep)[-1]}")
+                processing_summary = self.get_processing_summary()
+                previous_ims_size = processing_summary.get('building_ims', {}).get('other_ims_size', 0)
+                current_ims_size = os.path.getsize(ims_path)
+                has_progress = current_ims_size != previous_ims_size  # Not just > because other file could have started building
+                if has_progress:
+                    value_from_db = processing_summary.get('building_ims')
+                    if value_from_db:
+                        value_from_db.update({'other_ims_size': current_ims_size})
+                        self.update_processing_summary({'building_ims': value_from_db})
+                    else:
+                        self.update_processing_summary({'building_ims': {'other_ims_size': current_ims_size}})
+                return has_progress
+        return False
 
 
 def check_imaging():
@@ -792,7 +855,7 @@ def check_imaging():
                     if dataset.imaging_no_progress_time:
                         dataset.mark_has_imaging_progress()
                     continue
-                else:  # TODO else is redundant
+                else:
                     if not dataset.imaging_no_progress_time:
                         dataset.mark_no_imaging_progress()
                     else:
@@ -891,6 +954,7 @@ def check_processing():
             dataset.update_job_number(job_number)
             denoising_started = len(glob(os.path.join(dataset.job_dir, "composite*.tif"))) > 0
             if not denoising_started:
+                # TODO: update processing paused?
                 continue
             denoising_finished, denoising_has_progress = dataset.check_denoising_progress()
             if denoising_finished:
@@ -915,43 +979,89 @@ def check_processing():
     ).fetchall()
     for record in records:
         dataset = Dataset.initialize_from_db(record)
-        # TODO: check whether ims file is there and it opens
-        # TODO: otherwise, check there's progress (size of ims.part increased)
+        if os.path.exists(dataset.full_path_to_imaris_file):
+            try:
+                # try to open imaris file
+                ims_file = ims(dataset.full_path_to_imaris_file)
+            except Exception as e:
+                log.error("ERROR opening imaris file:", e)
+                dataset.send_message("broken_ims_file")
+                dataset.update_processing_status('paused')
+                continue
+            else:
+                dataset.update_processing_status('built_ims')
+                # TODO: send message that ims file built?
+                if not dataset.keep_composites:
+                    dataset.clean_up_composites()
+        elif os.path.exists(f"{dataset.full_path_to_imaris_file}.part") and os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', dataset.imsqueue_file_name)):
+            # Building of ims file in-progress
+            ims_has_progress = dataset.check_ims_building_progress()
+            if ims_has_progress:
+                if dataset.processing_no_progress_time:
+                    dataset.mark_has_processing_progress()
+                continue
+            else:
+                if not dataset.processing_no_progress_time:
+                    dataset.mark_no_processing_progress()
+                else:
+                    progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+                    if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                        dataset.update_processing_status('paused')
+                        dataset.send_message('ims_build_stuck')
+        else:
+            # ims file is not being built
+            in_queue = os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', dataset.imsqueue_file_name))
+            if in_queue:
+                if dataset.processing_no_progress_time:
+                    dataset.mark_has_processing_progress()
+                continue
+            else:
+                if not dataset.processing_no_progress_time:
+                    dataset.mark_no_processing_progress()
+                else:
+                    progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+                    if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                        dataset.update_processing_status('paused')
+                        dataset.send_message('ims_build_stuck')
+
+            # TODO: check what other file is being processed, check its size
+            ims_converter_works = dataset.check_ims_converter_works()
+            if ims_converter_works:
+                if dataset.processing_no_progress_time:
+                    dataset.mark_has_processing_progress()
+                continue
+            else:
+                if not dataset.processing_no_progress_time:
+                    dataset.mark_no_processing_progress()
+                else:
+                    progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+                    if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                        dataset.update_processing_status('paused')
+                        dataset.send_message('ims_build_stuck')
+
+    # Eventually datasets should be on hive
+    records = cur.execute(
+        'SELECT * FROM dataset WHERE processing_status="built_ims"'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
         path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
-        # check if path on hive exists (smth already copied) -> update db record (processing status, path on hive)
         if os.path.exists(os.path.join(path_on_hive, 'vs_series.dat')):
             dataset.update_path_on_hive(path_on_hive)
-            # dataset.update_processing_status('stitched')
-            composites_dir = os.path.join(path_on_hive, 'composites_RSCM_v0.1')
-            # check if job folder exists -> update db
-            job_dir = sorted(glob(os.path.join(composites_dir, 'job_*')))
-            if len(job_dir):
-                job_dir = job_dir[-1]
-                job_number = re.findall(r"\d+", os.path.basename(job_dir))[-1]
-                dataset.update_job_number(job_number)
-                # check if final ims file exists
-                ims_file_path = os.path.join(job_dir, f'composites_RSCM_v0.1_job_{job_number}.ims')
-                if os.path.exists(ims_file_path):
-                    try:
-                        # try to open imaris file
-                        ims_file = ims(ims_file_path)
-                    except Exception as e:
-                        print("ERROR opening imaris file:", e)
-                        dataset.send_message("broken_ims_file")
-                        dataset.update_processing_status('paused')
-                        # TODO: delete job# and path to imaris file from db
-                        continue
-                    # update db, send msg
-                    dataset.update_imaris_file_path(ims_file_path)
-                    if not dataset.keep_composites:
-                        dataset.clean_up_composites()
-                    dataset.update_processing_status('finished')
-                    dataset.send_message("processing_finished")
-                # check if ims file .part exists
-                elif os.path.exists(ims_file_path + '.part'):
-                    # update db
-                    # dataset.update_processing_status('denoised')
-                    pass
+        final_ims_file_path = os.path.join(path_on_hive, 'composites_RSCM_v0.1', f'job_{dataset.job_number}', dataset.imaris_file_name)
+        if os.path.exists(final_ims_file_path):
+            try:
+                ims_file = ims(final_ims_file_path)
+            except Exception as e:
+                # probably still copying
+                # TODO check size?
+                log.error(e)
+                continue
+            else:
+                # update db, send msg
+                dataset.update_imaris_file_path(final_ims_file_path)
+                dataset.update_processing_status('finished')
+                dataset.send_message("processing_finished")
 
 
 class Warning:
