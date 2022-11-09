@@ -63,6 +63,7 @@ pip install python-dotenv
 """
 
 import json
+import logging
 import os
 import re
 import requests
@@ -77,6 +78,22 @@ import tifffile
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from imaris_ims_file_reader import ims
+
+console_handler = logging.StreamHandler()
+LOG_FILE_NAME_PATTERN = "/CBI_FastStore/Iana/bot_logs/{}_{}.txt"
+TIMESTAMP_FORAMT = '%Y-%m-%d_%H:%M:%S'
+file_handler = logging.FileHandler(
+    LOG_FILE_NAME_PATTERN.format(
+        os.uname().nodename,
+        datetime.now().strftime(TIMESTAMP_FORAMT)
+    )
+)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(name)s - %(levelname)s - %(message)s',
+    handlers=[console_handler, file_handler]
+)
+log = logging.getLogger(__name__)
 
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
@@ -364,7 +381,7 @@ class Dataset:
         return finished, has_progress, error_flag
 
     def send_message(self, msg_type):
-        print("---------------------In send message------------------------")
+        log.info("---------------------Sending message------------------------")
         msg_map = {
             'imaging_started': "Imaging of {} {} {} *_started_*",
             'imaging_finished': "Imaging of {} {} {} *_finished_*",
@@ -385,7 +402,7 @@ class Dataset:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
-        print("Message text", msg_text)
+        log.info("Message text:", msg_text)
         payload = {
             "channel": SLACK_CHANNEL_ID,
             "blocks": [
@@ -465,15 +482,16 @@ class Dataset:
         contents = f'rootDir="{str(dat_file_path.parent)}"\nkeepComposites=True'
         with open(txt_file_path, "w") as f:
             f.write(contents)
-        print("-----------------------Created text file : ---------------------")
-        print(contents)
+        log.info("-----------------------Queue processing. Text file : ---------------------")
+        log.info(contents)
 
     def clean_up_composites(self):
         if self.path_on_hive and self.imaris_file_path:
             denoised_composites = sorted(glob(os.path.join(os.path.dirname(self.imaris_file_path), 'composite_*.tif')))
             raw_composites = sorted(glob(os.path.join(self.path_on_hive, "composites_RSCM_v0.1", 'composite_*.tif')))
+            log.info("---------------------Cleaning up composites--------------------")
             for f in denoised_composites + raw_composites:
-                print("Will remove", f)
+                log.info("Will remove:", f)
                 # os.remove(f)
 
     @classmethod
@@ -723,10 +741,10 @@ class Dataset:
         color = '405'
         rootDir = os.path.join(FASTSTORE_ACQUISITION_FOLDER, self.pi, self.cl_number, self.name)  # build path like this for safety reasons
         assert len(rootDir) > (len(FASTSTORE_ACQUISITION_FOLDER) + 1)  # for safety reasons
-        print("Removing color 405 in folder", rootDir)
+        log.info(f"Removing color 405 in folder {rootDir}")
         a = sorted(glob(os.path.join(rootDir, '**', color + '*')))
-        print("Will remove folders:")
-        print(*list(a), sep="\n")
+        log.info("Will remove folders:")
+        log.info("\n".join(list(a)))
         # z = [shutil.rmtree(x) for x in a]
 
 
@@ -746,10 +764,10 @@ def check_imaging():
         print("Working on: ", file_path)
         is_new = check_if_new(file_path)
         if is_new:
-            print("-----------------------New dataset--------------------------")
+            log.info("-----------------------New dataset--------------------------")
             dataset = Dataset.create(file_path)
+            log.info(dataset.path_on_fast_store)
             dataset.send_message('imaging_started')
-            # print(response)
         else:
             dataset = read_dataset_record(file_path)
             if not dataset or dataset.imaging_status == 'finished':
@@ -783,8 +801,7 @@ def check_imaging():
                         progress_stopped_at = datetime.strptime(dataset.imaging_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                             dataset.mark_paused()
-                            response = dataset.send_message('imaging_paused')
-                            print(response)
+                            dataset.send_message('imaging_paused')
             elif dataset.imaging_status == 'paused':
                 print("Imaging status is 'paused'")
                 finished, has_progress, error_flag = dataset.check_imaging_progress()  # maybe imaging resumed
@@ -923,7 +940,7 @@ def check_processing():
                         print("ERROR opening imaris file:", e)
                         dataset.send_message("broken_ims_file")
                         dataset.update_processing_status('paused')
-                        # TODO: delete job# and path to imaris file
+                        # TODO: delete job# and path to imaris file from db
                         continue
                     # update db, send msg
                     dataset.update_imaris_file_path(ims_file_path)
