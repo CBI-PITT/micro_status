@@ -701,13 +701,11 @@ class Dataset:
         return job_dirs[-1] if len(job_dirs) else None
 
     def check_all_raw_composites_present(self):
-        # TODO use this method in check_processing
         expected_composites = self.z_layers_total * self.channels
         actual_composites = len(glob(os.path.join(self.composites_dir, 'composite*.tif')))
         return expected_composites == actual_composites
 
     def check_all_raw_composites_same_size(self):
-        # TODO use this method in check_processing
         files = sorted(glob(os.path.join(self.composites_dir, 'composite*.tif')))
         composite_sizes = [os.path.getsize(x) for x in files]
         return len(set(composite_sizes)) == 1
@@ -836,8 +834,9 @@ def check_processing():
     for record in records:
         dataset = Dataset.initialize_from_db(record)
         if dataset.check_stitching_complete():
-            path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
-            if os.path.exists(path_on_hive):  # copying started
+            # path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
+            # if os.path.exists(path_on_hive):  # copying started
+            if dataset.check_all_raw_composites_present() and dataset.check_all_raw_composites_same_size():
                 dataset.update_processing_status('stitched')
         elif dataset.check_stitching_errored():
             dataset.update_processing_status('paused')
@@ -848,7 +847,7 @@ def check_processing():
                 if dataset.processing_no_progress_time:
                     dataset.mark_has_processing_progress()
                 continue
-            else:  # TODO else is redundant
+            else:
                 if not dataset.processing_no_progress_time:
                     dataset.mark_no_processing_progress()
                 else:
