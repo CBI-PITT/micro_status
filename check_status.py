@@ -704,6 +704,14 @@ class Dataset:
         """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_composites']]
         raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
+        composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
+        if os.path.exists(composites_dir):
+            return composites_dir
+        if data_location == FASTSTORE_ACQUISITION_FOLDER:
+            data_location = HIVE_ACQUISITION_FOLDER
+        else:
+            data_location = FASTSTORE_ACQUISITION_FOLDER
+        raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         return os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
 
     @property
@@ -712,9 +720,24 @@ class Dataset:
         At the time of denoising
         """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['denoise']]
+        print("data_location", data_location)
         raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
+        print("composites_dir", composites_dir)
         job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+        print("job_dirs", job_dirs)
+        if len(job_dirs):
+            return job_dirs[-1]
+        if data_location == FASTSTORE_ACQUISITION_FOLDER:
+            data_location = HIVE_ACQUISITION_FOLDER
+        else:
+            data_location = FASTSTORE_ACQUISITION_FOLDER
+        print("data_location 2", data_location)
+        raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
+        composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
+        print("composites_dir 2", composites_dir)
+        job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+        print("job_dirs 2", job_dirs)
         return job_dirs[-1] if len(job_dirs) else None
 
     @property
@@ -727,6 +750,15 @@ class Dataset:
         At the time of building ims
         """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_ims']]
+        folder = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1', f"job_{self.job_number}")
+        ims_path = os.path.join(folder, self.imaris_file_name)
+        if os.path.exists(ims_path):
+            return ims_path
+        if data_location == FASTSTORE_ACQUISITION_FOLDER:
+            data_location = HIVE_ACQUISITION_FOLDER
+        else:
+            data_location = FASTSTORE_ACQUISITION_FOLDER
+        print("data_location 2", data_location)
         folder = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1', f"job_{self.job_number}")
         return os.path.join(folder, self.imaris_file_name)
 
@@ -805,7 +837,10 @@ class Dataset:
     def check_ims_building_progress(self):
         processing_summary = self.get_processing_summary()
         previous_ims_size = processing_summary.get('building_ims', {}).get('ims_size', 0)
-        current_ims_size = os.path.getsize(self.full_path_to_imaris_file)
+        partial_ims_file = f"{self.full_path_to_imaris_file}.part"
+        if not os.path.exists(partial_ims_file):
+            return False
+        current_ims_size = os.path.getsize(partial_ims_file)
         has_progress = current_ims_size > previous_ims_size
         if has_progress:
             value_from_db = processing_summary.get('building_ims')
@@ -830,7 +865,7 @@ class Dataset:
             content = f.readlines()
             if len(content) and len(content[0].split('"')):
                 ims_dir = content[0].split('"')[1]
-                ims_path = os.path.join(ims_dir, f"composites_RSCM_v0.1_{ims_dir.split(os.path.sep)[-1]}")
+                ims_path = os.path.join(ims_dir, f"composites_RSCM_v0.1_{ims_dir.split(os.path.sep)[-1]}.ims.part")
                 processing_summary = self.get_processing_summary()
                 previous_ims_size = processing_summary.get('building_ims', {}).get('other_ims_size', 0)
                 current_ims_size = os.path.getsize(ims_path)
@@ -869,6 +904,31 @@ class Dataset:
                         self.update_processing_summary({'denoising': {'other_dataset_denoised': current_denoised_composites}})
                 return has_progress
         return False
+
+    def check_imaris_file_built(self):
+        file_opens = False
+        file_exists = os.path.exists(self.full_path_to_imaris_file)
+        if file_exists:
+            try:
+                # try to open imaris file
+                ims_file = ims(self.full_path_to_imaris_file)
+                file_opens = True
+            except:
+                file_opens = False
+        return file_exists and file_opens
+
+    def guess_processing_status(self):
+        status = "started"
+        if self.check_all_raw_composites_present() and self.check_all_raw_composites_same_size():
+            status = "stitched"
+        if self.check_all_denoised_composites_present() and self.check_all_denoised_composites_same_size():
+            status = "denoised"
+        if self.check_imaris_file_built():
+            status = "built_ims"
+        return status
+
+    def check_finalization_progress(self):
+        pass
 
 
 def check_imaging():
@@ -956,10 +1016,10 @@ def check_processing():
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="started"'
     ).fetchall()
-    # print("\nDataset instances where stitching started:")
+    print("\nDataset instances where stitching started:")
     for record in records:
         dataset = Dataset.initialize_from_db(record)
-        # print("-----", dataset)
+        print("-----", dataset)
         if dataset.check_stitching_complete():
             print("File in complete dir")
             # path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
@@ -1173,6 +1233,29 @@ def check_processing():
                 dataset.update_imaris_file_path(final_ims_file_path)
                 dataset.update_processing_status('finished')
                 dataset.send_message("processing_finished")
+
+    # Handle 'paused' processing status
+    records = cur.execute(
+        'SELECT * FROM dataset WHERE processing_status="paused"'
+    ).fetchall()
+    print("\nDatasets that are in paused status:")
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+        print("-----", dataset)
+        # TODO: see what stage processing is in
+        guessed_processing_status = dataset.guess_processing_status()
+        print("guessed_processing_status:", guessed_processing_status)
+        # TODO: see if there's any progress at this stage
+        progress_methods_map = {
+            "started": dataset.check_stitching_progress,
+            "stitched": dataset.check_denoising_progress,
+            "denoised": dataset.check_ims_building_progress,
+            "built_ims": dataset.check_finalization_progress
+        }
+        has_progress = progress_methods_map[guessed_processing_status]()
+        print("has progress", has_progress)
+        if has_progress:
+            dataset.update_processing_status(guessed_processing_status)
 
 
 class Warning:
