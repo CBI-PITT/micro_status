@@ -195,6 +195,9 @@ class Dataset:
         self.pi = kwargs.get('pi')
         self.imaging_status = kwargs.get('imaging_status')
         self.processing_status = kwargs.get('processing_status')
+        self.path_on_hive = kwargs.get('path_on_hive')
+        self.job_number = kwargs.get('job_number')
+        self.imaris_file_path = kwargs.get('imaris_file_path')
         self.channels = kwargs.get('channels')
         self.z_layers_total = kwargs.get('z_layers_total')
         self.z_layers_current = kwargs.get('z_layers_current')
@@ -206,6 +209,9 @@ class Dataset:
         self.z_layers_checked = kwargs.get('z_layers_checked')
         self.keep_composites = kwargs.get('keep_composites')
         self.delete_405 = kwargs.get('delete_405')
+
+    def __str__(self):
+        return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
 
     @classmethod
     def create(cls, file_path):
@@ -521,6 +527,9 @@ class Dataset:
             pi = pi_name,
             imaging_status = record[6],
             processing_status = record[7],
+            path_on_hive = record[8],
+            job_number = record[9],
+            imaris_file_path = record[10],
             channels = record[11],
             z_layers_total = record[12],
             z_layers_current = record[13],
@@ -722,7 +731,9 @@ class Dataset:
 
     def check_all_raw_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
+        print('expected_composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.composites_dir, 'composite*.tif')))
+        print('actual_composites', actual_composites)
         return expected_composites == actual_composites
 
     def check_all_raw_composites_same_size(self):
@@ -763,7 +774,32 @@ class Dataset:
         a = sorted(glob(os.path.join(rootDir, '**', color + '*')))
         log.info("Will remove folders:")
         log.info("\n".join(list(a)))
-        # z = [shutil.rmtree(x) for x in a]
+        # z = [shutil.rmtree(x) for x in a]  # TODO: uncomment once verified
+
+        # update channels number, total and finished ribbons number
+        self.channels -= 1
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'UPDATE dataset SET channels = {self.channels} WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        self.ribbons_total = self.z_layers_total * self.channels * self.ribbons_in_z_layer
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'UPDATE dataset SET ribbons_total = {self.ribbons_total} WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+
+        self.ribbons_finished = self.z_layers_total * self.channels * self.ribbons_in_z_layer
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'UPDATE dataset SET ribbons_finished = {self.ribbons_finished} WHERE id={self.db_id}')
+        con.commit()
+        con.close()
 
     def check_ims_building_progress(self):
         processing_summary = self.get_processing_summary()
@@ -894,17 +930,26 @@ def check_processing():
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="started"'
     ).fetchall()
+    # print("\nDataset instances where stitching started:")
     for record in records:
         dataset = Dataset.initialize_from_db(record)
+        # print("-----", dataset)
         if dataset.check_stitching_complete():
+            print("File in complete dir")
             # path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
             # if os.path.exists(path_on_hive):  # copying started
             if dataset.check_all_raw_composites_present() and dataset.check_all_raw_composites_same_size():
+                print("All composites present and same size")
                 dataset.update_processing_status('stitched')
+            else:
+                print("All composites present: ", dataset.check_all_raw_composites_present())
+                print("All composites same size: ", dataset.check_all_raw_composites_same_size())
         elif dataset.check_stitching_errored():
+            print("File in error dir")
             dataset.update_processing_status('paused')
             dataset.send_message('stitching_error')
         elif dataset.check_being_stitched():
+            print("File in processing dir")
             has_progress = dataset.check_stitching_progress()
             if has_progress:
                 if dataset.processing_no_progress_time:
@@ -918,12 +963,14 @@ def check_processing():
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
                         dataset.send_message('stitching_stuck')
+        else:
+            print("File in none of ClusterStitchTest dirs")
 
     # check moving to hive
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="stitched"'
     ).fetchall()
-
+    print("\nDataset instances that have been stitched:")
     # for record in records:
     #     dataset = Dataset.initialize_from_db(record)
     #     all_ribbons_present = dataset.check_all_ribbons_present()
@@ -948,15 +995,21 @@ def check_processing():
 
     for record in records:
         dataset = Dataset.initialize_from_db(record)
-
+        print("-----", dataset)
         if dataset.job_dir:
+            print("Job dir is there")
             job_number = re.findall(r"\d+", os.path.basename(dataset.job_dir))[-1]
             dataset.update_job_number(job_number)
             denoising_started = len(glob(os.path.join(dataset.job_dir, "composite*.tif"))) > 0
+            print("Denoising started:", denoising_started)
+            # print("Job dir", dataset.job_dir)
             if not denoising_started:
-                # TODO: update processing paused?
+                # TODO: check the denoising queue
+                # TODO: check that something else is being denoised and making progress
                 continue
             denoising_finished, denoising_has_progress = dataset.check_denoising_progress()
+            print('denoising_finished', denoising_finished)
+            print('denoising_has_progress', denoising_has_progress)
             if denoising_finished:
                 dataset.update_processing_status('denoised')
                 continue
@@ -977,8 +1030,11 @@ def check_processing():
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="denoised"'
     ).fetchall()
+    print("Dataset records that have been denoised", records)
+    print("\nDataset instances that have been denoised:")
     for record in records:
         dataset = Dataset.initialize_from_db(record)
+        print("-----", dataset)
         if os.path.exists(dataset.full_path_to_imaris_file):
             try:
                 # try to open imaris file
