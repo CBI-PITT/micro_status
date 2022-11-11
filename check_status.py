@@ -107,6 +107,7 @@ SLACK_HEADERS = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8', 
 PROGRESS_TIMEOUT = 600  # seconds
 RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 RSCM_FOLDER_BUILDING_IMS = "/CBI_FastStore/clusterStitch"
+CBPY_FOLDER = "/CBI_FastStore/clusterPy"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
 MAX_ALLOWED_STORAGE_PERCENT = 94
@@ -844,6 +845,31 @@ class Dataset:
                 return has_progress
         return False
 
+    def check_cbpy_works(self):
+        currently_denoising = glob(os.path.join(CBPY_FOLDER, 'active', '*.xml*'))
+        if len(currently_denoising):
+            currently_building = currently_denoising[0]
+        else:
+            return False
+        with open(currently_building, 'r') as f:
+            content = f.read()
+            if len(content):
+                soup = BeautifulSoup(content, "xml")
+                root_dir = soup.find('outFilePathUnix').text
+                processing_summary = self.get_processing_summary()
+                previous_denoised_composites = processing_summary.get('denoising', {}).get('other_dataset_denoised', 0)
+                current_denoised_composites = len(glob(os.path.join(root_dir, "composite*.tif")))
+                has_progress = current_denoised_composites != previous_denoised_composites  # Not just > because other file could have started building
+                if has_progress:
+                    value_from_db = processing_summary.get('denoising')
+                    if value_from_db:
+                        value_from_db.update({'other_dataset_denoised': current_denoised_composites})
+                        self.update_processing_summary({'denoising': value_from_db})
+                    else:
+                        self.update_processing_summary({'denoising': {'other_dataset_denoised': current_denoised_composites}})
+                return has_progress
+        return False
+
 
 def check_imaging():
     # Discover all vs_series.dat files in the acquisition directory
@@ -1004,9 +1030,38 @@ def check_processing():
             print("Denoising started:", denoising_started)
             # print("Job dir", dataset.job_dir)
             if not denoising_started:
-                # TODO: check the denoising queue
-                # TODO: check that something else is being denoised and making progress
+                # TODO: check the # of queued files == number of composites ?
+                in_queue = len(glob(os.path.join(CBPY_FOLDER, 'queueGPU', f"job_{dataset.job_number}*"))) > 0
+                print("In queue:", in_queue)
+                if in_queue:
+                    if dataset.processing_no_progress_time:
+                        dataset.mark_has_processing_progress()
+                    # continue
+                else:
+                    if not dataset.processing_no_progress_time:
+                        dataset.mark_no_processing_progress()
+                    else:
+                        progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+                        if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                            dataset.update_processing_status('paused')
+                            dataset.send_message('denoising_stuck')
+                # check that something else is being denoised and making progress
+                cbpy_works = dataset.check_cbpy_works()
+                print("CBPY works:", cbpy_works)
+                if cbpy_works:
+                    if dataset.processing_no_progress_time:
+                        dataset.mark_has_processing_progress()
+                    continue
+                else:
+                    if not dataset.processing_no_progress_time:
+                        dataset.mark_no_processing_progress()
+                    else:
+                        progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+                        if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+                            dataset.update_processing_status('paused')
+                            dataset.send_message('denoising_stuck')
                 continue
+
             denoising_finished, denoising_has_progress = dataset.check_denoising_progress()
             print('denoising_finished', denoising_finished)
             print('denoising_has_progress', denoising_has_progress)
@@ -1070,7 +1125,7 @@ def check_processing():
             if in_queue:
                 if dataset.processing_no_progress_time:
                     dataset.mark_has_processing_progress()
-                continue
+                # continue
             else:
                 if not dataset.processing_no_progress_time:
                     dataset.mark_no_processing_progress()
@@ -1080,7 +1135,7 @@ def check_processing():
                         dataset.update_processing_status('paused')
                         dataset.send_message('ims_build_stuck')
 
-            # TODO: check what other file is being processed, check its size
+            # check what other file is being processed, check its size
             ims_converter_works = dataset.check_ims_converter_works()
             if ims_converter_works:
                 if dataset.processing_no_progress_time:
