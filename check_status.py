@@ -493,7 +493,7 @@ class Dataset:
         """
         dat_file_path = Path(self.path_on_fast_store)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
-        contents = f'rootDir="{str(dat_file_path.parent)}"\nkeepComposites=True'
+        contents = f'rootDir="{str(dat_file_path.parent)}"\nkeepComposites=True\nmoveToHive=False'
         with open(txt_file_path, "w") as f:
             f.write(contents)
         log.info("-----------------------Queue processing. Text file : ---------------------")
