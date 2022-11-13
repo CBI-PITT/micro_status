@@ -114,6 +114,7 @@ MAX_ALLOWED_STORAGE_PERCENT = 94
 STORAGE_THRESHOLD_0 = 85
 STORAGE_THRESHOLD_1 = 90
 CHECKING_TIFFS_ENABLED = True
+MESSAGES_ENABLED = True
 WHERE_PROCESSING_HAPPENS = {
     'stitch': 'faststore',
     'build_composites': 'faststore',
@@ -410,7 +411,7 @@ class Dataset:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
-        log.info("Message text:", msg_text)
+        log.info(f"Message text: {msg_text}")
         payload = {
             "channel": SLACK_CHANNEL_ID,
             "blocks": [
@@ -423,8 +424,9 @@ class Dataset:
                 }
             ]
         }
-        response = requests.post(SLACK_URL, data=json.dumps(payload), headers=SLACK_HEADERS)
-        return response
+        if MESSAGES_ENABLED:  # doing this check here to be able to save message to logs
+            response = requests.post(SLACK_URL, data=json.dumps(payload), headers=SLACK_HEADERS)
+        return True
 
     def mark_no_imaging_progress(self):
         progress_stopped_at = datetime.now().strftime(DATETIME_FORMAT)
