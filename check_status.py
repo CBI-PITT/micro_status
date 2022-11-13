@@ -720,24 +720,18 @@ class Dataset:
         At the time of denoising
         """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['denoise']]
-        print("data_location", data_location)
         raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
-        print("composites_dir", composites_dir)
         job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
-        print("job_dirs", job_dirs)
         if len(job_dirs):
             return job_dirs[-1]
         if data_location == FASTSTORE_ACQUISITION_FOLDER:
             data_location = HIVE_ACQUISITION_FOLDER
         else:
             data_location = FASTSTORE_ACQUISITION_FOLDER
-        print("data_location 2", data_location)
         raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
-        print("composites_dir 2", composites_dir)
         job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
-        print("job_dirs 2", job_dirs)
         return job_dirs[-1] if len(job_dirs) else None
 
     @property
@@ -758,15 +752,14 @@ class Dataset:
             data_location = HIVE_ACQUISITION_FOLDER
         else:
             data_location = FASTSTORE_ACQUISITION_FOLDER
-        print("data_location 2", data_location)
         folder = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1', f"job_{self.job_number}")
         return os.path.join(folder, self.imaris_file_name)
 
     def check_all_raw_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
-        print('expected_composites', expected_composites)
+        print('expected raw composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.composites_dir, 'composite*.tif')))
-        print('actual_composites', actual_composites)
+        print('actual raw composites', actual_composites)
         return expected_composites == actual_composites
 
     def check_all_raw_composites_same_size(self):
@@ -776,7 +769,9 @@ class Dataset:
 
     def check_all_denoised_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
+        print('expected denoised composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.job_dir, 'composite*.tif')))
+        print('actual denoised composites', actual_composites)
         return expected_composites == actual_composites
 
     def check_all_denoised_composites_same_size(self):
@@ -807,7 +802,7 @@ class Dataset:
         a = sorted(glob(os.path.join(rootDir, '**', color + '*')))
         log.info("Will remove folders:")
         log.info("\n".join(list(a)))
-        # z = [shutil.rmtree(x) for x in a]  # TODO: uncomment once verified
+        z = [shutil.rmtree(x) for x in a]
 
         # update channels number, total and finished ribbons number
         self.channels -= 1
