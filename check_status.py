@@ -67,6 +67,7 @@ import logging
 import os
 import re
 import requests
+import shutil
 import subprocess
 import sqlite3
 import time
@@ -396,18 +397,21 @@ class Dataset:
             'imaging_paused': "*WARNING: Imaging of {} {} {} paused at z-layer {}*",
             # 'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
-            'processing_finished': "Imaris file built for {} {} {}. Check it out at {}",
+            'processing_finished': "Processing of {} {} {} finished",
             'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
             'denoising_stuck': "*WARNING: Denoising of {} {} {} could be stuck. Check CBPy.*",
             'ims_build_stuck': "*WARNING: Building of Imaris file for {} {} {} could be stuck. Check conversion tool.*",
-            'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*"
+            'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*",
+            'built_ims': "Imaris file built for {} {} {}. Check it out at {}"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
-        elif msg_type == 'processing_finished':
-            ims_folder = str(PureWindowsPath(str(Path(self.imaris_file_path).parent).replace('/CBI_Hive', 'H:')))
+        elif msg_type == 'built_ims':
+            imaris_file_path = self.full_path_to_imaris_file
+            # ims_folder = str(PureWindowsPath(str(Path(imaris_file_path).parent).replace('/CBI_Hive', 'H:')))
+            ims_folder = str(PureWindowsPath(str(Path(imaris_file_path).parent).replace('/CBI_Hive', 'H:').replace('/CBI_FastStore', 'Z:')))
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
@@ -501,8 +505,10 @@ class Dataset:
 
     def clean_up_composites(self):
         if self.path_on_hive and self.imaris_file_path:
-            denoised_composites = sorted(glob(os.path.join(os.path.dirname(self.imaris_file_path), 'composite_*.tif')))
-            raw_composites = sorted(glob(os.path.join(self.path_on_hive, "composites_RSCM_v0.1", 'composite_*.tif')))
+            if not self.composites_dir or not self.job_dir:
+                return
+            denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
+            raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
             log.info("---------------------Cleaning up composites--------------------")
             for f in denoised_composites + raw_composites:
                 log.info("Will remove:", f)
@@ -730,15 +736,20 @@ class Dataset:
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
         job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
         if len(job_dirs):
-            return job_dirs[-1]
-        if data_location == FASTSTORE_ACQUISITION_FOLDER:
-            data_location = HIVE_ACQUISITION_FOLDER
-        else:
-            data_location = FASTSTORE_ACQUISITION_FOLDER
-        raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
-        composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
-        job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
-        return job_dirs[-1] if len(job_dirs) else None
+            final_job_dir = job_dirs[-1]
+        else: # TODO: rewrite this terrible piece
+            if data_location == FASTSTORE_ACQUISITION_FOLDER:
+                data_location = HIVE_ACQUISITION_FOLDER
+            else:
+                data_location = FASTSTORE_ACQUISITION_FOLDER
+            raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
+            composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
+            job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+            final_job_dir = job_dirs[-1] if len(job_dirs) else None
+        if final_job_dir:
+            job_number = re.findall(r"\d+", os.path.basename(final_job_dir))[-1]
+            self.update_job_number(job_number)
+        return final_job_dir
 
     @property
     def imaris_file_name(self):
@@ -750,16 +761,26 @@ class Dataset:
         At the time of building ims
         """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_ims']]
-        folder = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1', f"job_{self.job_number}")
-        ims_path = os.path.join(folder, self.imaris_file_name)
+        composites_dir = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1')
+        job_folder = os.path.join(composites_dir, f"job_{self.job_number}")
+        if not os.path.exists(job_folder):
+            # if folder doesn't exist, try to find other job folders
+            job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+            job_folder = job_dirs[-1] if len(job_dirs) else composites_dir
+        ims_path = os.path.join(job_folder, self.imaris_file_name)
         if os.path.exists(ims_path):
             return ims_path
-        if data_location == FASTSTORE_ACQUISITION_FOLDER:
+        if data_location == FASTSTORE_ACQUISITION_FOLDER:  # TODO: rewrite this terrible piece
             data_location = HIVE_ACQUISITION_FOLDER
         else:
             data_location = FASTSTORE_ACQUISITION_FOLDER
-        folder = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1', f"job_{self.job_number}")
-        return os.path.join(folder, self.imaris_file_name)
+        composites_dir = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1')
+        job_folder = os.path.join(composites_dir, f"job_{self.job_number}")
+        if not os.path.exists(job_folder):
+            # if folder doesn't exist, try to find other job folders
+            job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+            job_folder = job_dirs[-1] if len(job_dirs) else composites_dir
+        return os.path.join(job_folder, self.imaris_file_name)
 
     def check_all_raw_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
@@ -785,12 +806,12 @@ class Dataset:
         composite_sizes = [os.path.getsize(x) for x in files]
         return len(set(composite_sizes)) == 1
 
-    def check_denoising_progress(self):
+    def check_denoising_finished(self):
         all_denoised_composites_present = self.check_all_denoised_composites_present()
         all_denoised_composites_same_size = self.check_all_denoised_composites_same_size()
-        denoising_finished = all_denoised_composites_present and all_denoised_composites_same_size
-        if denoising_finished:
-            return True, True
+        return all_denoised_composites_present and all_denoised_composites_same_size
+
+    def check_denoising_progress(self):
         processing_summary = self.get_processing_summary()
         denoising_summary = processing_summary.get('denoising', {})
         previous_denoised_composites = denoising_summary.get('denoised_composites', 0)
@@ -798,7 +819,7 @@ class Dataset:
         denoising_has_progress = denoised_composites > previous_denoised_composites
         if denoising_has_progress:
             self.update_processing_summary({"denoising": {"denoised_composites": denoised_composites}})
-        return denoising_finished, denoising_has_progress
+        return denoising_has_progress
 
     def delete_channel_405(self):
         color = '405'
@@ -836,6 +857,7 @@ class Dataset:
         con.close()
 
     def check_ims_building_progress(self):
+        # TODO: if in queue and other ims file actively building, return True
         processing_summary = self.get_processing_summary()
         previous_ims_size = processing_summary.get('building_ims', {}).get('ims_size', 0)
         partial_ims_file = f"{self.full_path_to_imaris_file}.part"
@@ -938,7 +960,7 @@ class Dataset:
         """
         dat_file_path = Path(self.path_on_fast_store)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_move_txt_file_name)
-        contents = f'rootDir="{str(dat_file_path.parent)}"\nIMS=False\ndenoise=False'
+        contents = f'rootDir="{str(dat_file_path.parent)}"\nIMS=False\ndenoise=False\nmoveOnly=True'
         with open(txt_file_path, "w") as f:
             f.write(contents)
         log.info("-----------------------Queue moving to Hive. Text file : ---------------------")
@@ -1026,7 +1048,8 @@ def check_processing():
     # check if they are on the same stage or moved to the next stage
     # check if it is stuck
 
-    # check stitching
+    # =========================  check stitching  ============================
+
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="started"'
     ).fetchall()
@@ -1066,7 +1089,8 @@ def check_processing():
         else:
             print("File in none of ClusterStitchTest dirs")
 
-    # check moving to hive
+    # ====================  check denoising =====================
+
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="stitched"'
     ).fetchall()
@@ -1136,12 +1160,13 @@ def check_processing():
                             dataset.send_message('denoising_stuck')
                 continue
 
-            denoising_finished, denoising_has_progress = dataset.check_denoising_progress()
+            denoising_finished = dataset.check_denoising_finished()
             print('denoising_finished', denoising_finished)
-            print('denoising_has_progress', denoising_has_progress)
             if denoising_finished:
                 dataset.update_processing_status('denoised')
                 continue
+            denoising_has_progress = dataset.check_denoising_progress()
+            print('denoising_has_progress', denoising_has_progress)
             if denoising_has_progress:
                 if dataset.processing_no_progress_time:
                     dataset.mark_has_processing_progress()
@@ -1155,11 +1180,10 @@ def check_processing():
                         dataset.update_processing_status('paused')
                         dataset.send_message('denoising_stuck')
 
-    # check building imaris file
+    # ===================== check building imaris file ========================
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="denoised"'
     ).fetchall()
-    print("Dataset records that have been denoised", records)
     print("\nDataset instances that have been denoised:")
     for record in records:
         dataset = Dataset.initialize_from_db(record)
@@ -1169,13 +1193,13 @@ def check_processing():
                 # try to open imaris file
                 ims_file = ims(dataset.full_path_to_imaris_file)
             except Exception as e:
-                log.error("ERROR opening imaris file:", e)
+                log.error(f"ERROR opening imaris file: {e}")
                 dataset.send_message("broken_ims_file")
                 dataset.update_processing_status('paused')
                 continue
             else:
                 dataset.update_processing_status('built_ims')
-                # TODO: send message that ims file built?
+                dataset.send_message('built_ims')
                 if not dataset.keep_composites:
                     dataset.clean_up_composites()
                 dataset.start_moving()
@@ -1196,7 +1220,8 @@ def check_processing():
                         dataset.send_message('ims_build_stuck')
         else:
             # ims file is not being built
-            in_queue = os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', dataset.imsqueue_file_name))
+            # in_queue = os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', dataset.imsqueue_file_name))
+            in_queue = len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', f"*{dataset.job_number}*.txt.imsqueue"))) > 0
             if in_queue:
                 if dataset.processing_no_progress_time:
                     dataset.mark_has_processing_progress()
@@ -1249,7 +1274,7 @@ def check_processing():
                 dataset.update_processing_status('finished')
                 dataset.send_message("processing_finished")
 
-    # Handle 'paused' processing status
+    # ==================== Handle 'paused' processing status ==================
     records = cur.execute(
         'SELECT * FROM dataset WHERE processing_status="paused"'
     ).fetchall()
@@ -1440,7 +1465,7 @@ def scan():
         check_processing()
         # TODO db_cleanup()
     except Exception as e:
-        print("\n\n!!! EXCEPTION:", e, '\n\n')
+        log.error(f"\nEXCEPTION: {e}\n")
 
     print("========================== Waiting 30 seconds ========================")
     time.sleep(30)
