@@ -60,6 +60,10 @@ Other warnings:
 
 
 pip install python-dotenv
+
+ROADMAP:
+    - make dedicated folder on FastStore to move all garbage there
+    - delete raw composites once denoising finished (if no keep_composites is set)
 """
 
 import json
@@ -782,6 +786,17 @@ class Dataset:
             job_folder = job_dirs[-1] if len(job_dirs) else composites_dir
         return os.path.join(job_folder, self.imaris_file_name)
 
+    @property
+    def full_path_to_ims_part_file(self):
+        data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_ims']]
+        composites_dir = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1')
+        job_folder = os.path.join(composites_dir, f"job_{self.job_number}")
+        if not os.path.exists(job_folder):
+            # if folder doesn't exist, try to find other job folders
+            job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+            job_folder = job_dirs[-1] if len(job_dirs) else composites_dir
+        return os.path.join(job_folder, f"{self.imaris_file_name}.part")
+
     def check_all_raw_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
         print('expected raw composites', expected_composites)
@@ -857,14 +872,20 @@ class Dataset:
         con.close()
 
     def check_ims_building_progress(self):
-        # TODO: if in queue and other ims file actively building, return True
+        print("in check_ims_building_progress")
         processing_summary = self.get_processing_summary()
         previous_ims_size = processing_summary.get('building_ims', {}).get('ims_size', 0)
-        partial_ims_file = f"{self.full_path_to_imaris_file}.part"
+        partial_ims_file = self.full_path_to_ims_part_file
+        print("partial_ims_file", partial_ims_file)
         if not os.path.exists(partial_ims_file):
-            return False
-        current_ims_size = os.path.getsize(partial_ims_file)
-        has_progress = current_ims_size > previous_ims_size
+            print("Partial ims file doesn't exist")
+            has_progress = False
+            current_ims_size = 0
+        else:
+            print("Partial ims file exists")
+            current_ims_size = os.path.getsize(partial_ims_file)
+            has_progress = current_ims_size > previous_ims_size
+            print("current_ims_size > previous_ims_size", has_progress)
         if has_progress:
             value_from_db = processing_summary.get('building_ims')
             if value_from_db:
@@ -872,6 +893,10 @@ class Dataset:
                 self.update_processing_summary({'building_ims': value_from_db})
             else:
                 self.update_processing_summary({'building_ims': {'ims_size': current_ims_size}})
+        else:
+            print("in_imaris_queue and ims_converter_works", self.in_imaris_queue and self.check_ims_converter_works())
+            has_progress = self.in_imaris_queue and self.check_ims_converter_works()
+            print("has_progress", has_progress)
         return has_progress
 
     @property
@@ -965,6 +990,10 @@ class Dataset:
             f.write(contents)
         log.info("-----------------------Queue moving to Hive. Text file : ---------------------")
         log.info(contents)
+
+    @property
+    def in_imaris_queue(self):
+        return len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', f"*{self.job_number}*.txt.imsqueue"))) > 0
 
 
 def check_imaging():
@@ -1221,8 +1250,7 @@ def check_processing():
         else:
             # ims file is not being built
             # in_queue = os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', dataset.imsqueue_file_name))
-            in_queue = len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', f"*{dataset.job_number}*.txt.imsqueue"))) > 0
-            if in_queue:
+            if dataset.in_imaris_queue:
                 if dataset.processing_no_progress_time:
                     dataset.mark_has_processing_progress()
                 # continue
