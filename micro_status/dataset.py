@@ -335,15 +335,15 @@ class Dataset:
         log.info(contents)
 
     def clean_up_composites(self):
-        if self.path_on_hive and self.imaris_file_path:
-            if not self.composites_dir or not self.job_dir:
-                return
-            denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
-            raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
-            log.info("---------------------Cleaning up composites--------------------")
-            for f in denoised_composites + raw_composites:
-                log.info("Will remove:", f)
-                # os.remove(f)
+        # if self.path_on_hive and self.imaris_file_path:
+        if not self.composites_dir or not self.job_dir:
+            return
+        denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
+        raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
+        log.info("---------------------Cleaning up composites--------------------")
+        for f in denoised_composites + raw_composites:
+            log.info("Will remove:", f)
+            os.remove(f)
 
     @classmethod
     def initialize_from_db(cls, record):
