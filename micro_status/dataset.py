@@ -335,15 +335,34 @@ class Dataset:
         log.info(contents)
 
     def clean_up_composites(self):
+        log.info("---------------------Cleaning up composites--------------------")
         # if self.path_on_hive and self.imaris_file_path:
+        log.info(f"composites_dir: {self.composites_dir}")
+        log.info(f"job_dir: {self.job_dir}")
         if not self.composites_dir or not self.job_dir:
             return
         denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
+        log.info(f"denoised_composites: {len(denoised_composites)}")
         raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
-        log.info("---------------------Cleaning up composites--------------------")
-        for f in denoised_composites + raw_composites:
-            log.info("Will remove:", f)
-            os.remove(f)
+        log.info(f"raw_composites: {len(raw_composites)}")
+        if self.full_path_to_imaris_file.startswith('/CBI_FastStore'):
+            trash_location = FASTSTORE_TRASH_LOCATION
+        else:
+            trash_location = HIVE_TRASH_LOCATION
+        trash_folder_raw = os.path.join(trash_location, self.pi, self.cl_number, self.name, "raw_composites")
+        if not os.path.exists(trash_folder_raw):
+            os.makedirs(trash_folder_raw)
+        trash_folder_denoised = os.path.join(trash_location, self.pi, self.cl_number, self.name, "denoised_composites")
+        if not os.path.exists(trash_folder_denoised):
+            os.makedirs(trash_folder_denoised)
+        for f in raw_composites:
+            log.info(f"move to trash: {f}")
+            trash_path = os.path.join(trash_folder_raw, os.path.basename(f))
+            shutil.move(f, trash_path)
+        for f in denoised_composites:
+            log.info(f"move to trash: {f}")
+            trash_path = os.path.join(trash_folder_denoised, os.path.basename(f))
+            shutil.move(f, trash_path)
 
     @classmethod
     def initialize_from_db(cls, record):
@@ -616,6 +635,19 @@ class Dataset:
     @property
     def full_path_to_ims_part_file(self):
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_ims']]
+        composites_dir = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1')
+        job_folder = os.path.join(composites_dir, f"job_{self.job_number}")
+        if not os.path.exists(job_folder):
+            # if folder doesn't exist, try to find other job folders
+            job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
+            job_folder = job_dirs[-1] if len(job_dirs) else composites_dir
+        ims_part_path = os.path.join(job_folder, f"{self.imaris_file_name}.part")
+        if os.path.exists(ims_part_path):
+            return ims_part_path
+        if data_location == FASTSTORE_ACQUISITION_FOLDER:  # TODO: rewrite this terrible piece
+            data_location = HIVE_ACQUISITION_FOLDER
+        else:
+            data_location = FASTSTORE_ACQUISITION_FOLDER
         composites_dir = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1')
         job_folder = os.path.join(composites_dir, f"job_{self.job_number}")
         if not os.path.exists(job_folder):

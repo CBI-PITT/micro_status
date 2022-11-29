@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
 HIVE_ACQUISITION_FOLDER = "/CBI_Hive/Acquire"
 DB_LOCATION = "/CBI_FastStore/Iana/RSCM_datasets.db"
+FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
+HIVE_TRASH_LOCATION = "/CBI_Hive/trash"
 
 SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()

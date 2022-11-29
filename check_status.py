@@ -62,8 +62,10 @@ Other warnings:
 pip install python-dotenv
 
 ROADMAP:
-    - make dedicated folder on FastStore to move all garbage there
+    - remove 405 color to trash folder
     - delete raw composites once denoising finished (if no keep_composites is set)
+    - track moving to hive
+    - more informative processing statuses
 """
 
 import json
@@ -385,6 +387,7 @@ def check_processing():
         dataset = Dataset.initialize_from_db(record)
         print("-----", dataset)
         if os.path.exists(dataset.full_path_to_imaris_file):
+            print("Imaris file exists")
             try:
                 # try to open imaris file
                 ims_file = ims(dataset.full_path_to_imaris_file)
@@ -392,6 +395,13 @@ def check_processing():
                 log.error(f"ERROR opening imaris file: {e}")
                 dataset.send_message("broken_ims_file")
                 dataset.update_processing_status('paused')
+
+                # update ims_size=0 in processing_summary
+                processing_summary = dataset.get_processing_summary()
+                value_from_db = processing_summary.get('building_ims')
+                if value_from_db:
+                    value_from_db.update({'ims_size': 0})
+                    dataset.update_processing_summary({'building_ims': value_from_db})
                 continue
             else:
                 dataset.update_processing_status('built_ims')
@@ -399,8 +409,10 @@ def check_processing():
                 if not dataset.keep_composites:
                     dataset.clean_up_composites()
                 dataset.start_moving()
-        elif os.path.exists(f"{dataset.full_path_to_imaris_file}.part") and os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', dataset.imsqueue_file_name)):
+        # elif os.path.exists(dataset.full_path_to_ims_part_file) and os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', dataset.imsqueue_file_name)):
+        elif os.path.exists(dataset.full_path_to_ims_part_file) and len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', f"*{dataset.job_number}*.txt.imsqueue"))):
             # Building of ims file in-progress
+            print("Building Imaris file in-progress")
             ims_has_progress = dataset.check_ims_building_progress()
             if ims_has_progress:
                 if dataset.processing_no_progress_time:
@@ -416,6 +428,7 @@ def check_processing():
                         dataset.send_message('ims_build_stuck')
         else:
             # ims file is not being built
+            print("Imaris file is not being built")
             # in_queue = os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', dataset.imsqueue_file_name))
             if dataset.in_imaris_queue:
                 if dataset.processing_no_progress_time:
