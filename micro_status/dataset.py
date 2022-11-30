@@ -828,8 +828,12 @@ class Dataset:
         status = "started"
         if self.check_all_raw_composites_present() and self.check_all_raw_composites_same_size():
             status = "stitched"
+        else:
+            return status
         if self.check_all_denoised_composites_present() and self.check_all_denoised_composites_same_size():
             status = "denoised"
+        else:
+            return status
         if self.check_imaris_file_built():
             status = "built_ims"
         return status
