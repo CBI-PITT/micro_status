@@ -66,6 +66,8 @@ ROADMAP:
     - delete raw composites once denoising finished (if no keep_composites is set)
     - track moving to hive
     - more informative processing statuses
+    - extract tiff series after ims file is on hive
+    - do alignment, spot counting etc?
 """
 
 import json
