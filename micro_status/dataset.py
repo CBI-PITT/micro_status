@@ -235,7 +235,8 @@ class Dataset:
             'denoising_stuck': "*WARNING: Denoising of {} {} {} could be stuck. Check CBPy.*",
             'ims_build_stuck': "*WARNING: Building of Imaris file for {} {} {} could be stuck. Check conversion tool.*",
             'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*",
-            'built_ims': "Imaris file built for {} {} {}. Check it out at {}"
+            'built_ims': "Imaris file built for {} {} {}. Check it out at {}",
+            'ignoring_demo_dataset': "Ignoring demo dataset {} {} {}"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)

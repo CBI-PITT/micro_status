@@ -186,6 +186,14 @@ def check_imaging():
             log.info("-----------------------New dataset--------------------------")
             dataset = Dataset.create(file_path)
             log.info(dataset.path_on_fast_store)
+            if "demo" in dataset.name:
+                # demo dataset
+                log.info(f"Ignoring demo dataset {dataset}")
+                print(f"Ignoring demo dataset {dataset}")
+                dataset.send_message('ignoring_demo_dataset')
+                dataset.mark_imaging_finished()
+                dataset.update_processing_status('finished')
+                continue
             dataset.send_message('imaging_started')
         else:
             dataset = read_dataset_record(file_path)
