@@ -405,6 +405,7 @@ def check_processing():
                 log.error(f"ERROR opening imaris file: {e}")
                 dataset.send_message("broken_ims_file")
                 dataset.update_processing_status('paused')
+                dataset.requeue_ims()
 
                 # update ims_size=0 in processing_summary
                 processing_summary = dataset.get_processing_summary()

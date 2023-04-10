@@ -229,7 +229,7 @@ class Dataset:
             # 'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
             'processing_finished': "Processing of {} {} {} finished",
-            'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
+            'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}. Requeuing.*",
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
             'denoising_stuck': "*WARNING: Denoising of {} {} {} could be stuck. Check CBPy.*",
@@ -858,6 +858,31 @@ class Dataset:
     @property
     def in_imaris_queue(self):
         return len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', f"*{self.job_number}*.txt.imsqueue"))) > 0
+
+    def requeue_ims(self):
+        if self.full_path_to_imaris_file.startswith('/CBI_FastStore'):
+            trash_location = FASTSTORE_TRASH_LOCATION
+        else:
+            trash_location = HIVE_TRASH_LOCATION
+        trash_folder_ims = os.path.join(trash_location, self.pi, self.cl_number, self.name, f"ims_{DATETIME_FORMAT}")
+        os.makedirs(trash_folder_ims)
+
+        # check whether it is .ims.part file or .ims file
+        if os.path.exists(self.full_path_to_imaris_file):
+            file_to_delete = self.full_path_to_imaris_file
+
+        # move broken imaris file to trash folder
+        shutil.move(file_to_delete, os.path.join(trash_folder_ims, os.path.basename(file_to_delete)))
+
+        # move .imsqueue file to queue
+        if self.in_imaris_queue():
+            return
+        complete_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'complete', f"*{self.job_number}*.txt.imsqueue"))
+        if len(complete_imsqueue_files) > 0:
+            shutil.move(
+                complete_imsqueue_files[0],
+                os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', os.path.basename(complete_imsqueue_files[0]))
+            )
 
 
 class Found(BaseException):
