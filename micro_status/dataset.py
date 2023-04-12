@@ -864,7 +864,7 @@ class Dataset:
             trash_location = FASTSTORE_TRASH_LOCATION
         else:
             trash_location = HIVE_TRASH_LOCATION
-        trash_folder_ims = os.path.join(trash_location, self.pi, self.cl_number, self.name, f"ims_{DATETIME_FORMAT}")
+        trash_folder_ims = os.path.join(trash_location, self.pi, self.cl_number, self.name, f"ims_{datetime.now().strftime(DATETIME_FORMAT)}")
         os.makedirs(trash_folder_ims)
 
         # check whether it is .ims.part file or .ims file
