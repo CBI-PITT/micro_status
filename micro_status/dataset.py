@@ -233,10 +233,11 @@ class Dataset:
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
             'denoising_stuck': "*WARNING: Denoising of {} {} {} could be stuck. Check CBPy.*",
-            'ims_build_stuck': "*WARNING: Building of Imaris file for {} {} {} could be stuck. Check conversion tool.*",
+            'ims_build_stuck': "*WARNING: Building of Imaris file for {} {} {} seems to be stuck.*",
             'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*",
             'built_ims': "Imaris file built for {} {} {}. Check it out at {}",
-            'ignoring_demo_dataset': "Ignoring demo dataset {} {} {}"
+            'ignoring_demo_dataset': "Ignoring demo dataset {} {} {}",
+            'requeue_ims': "Requeuing ims build task for {} {} {}"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -870,6 +871,8 @@ class Dataset:
         # check whether it is .ims.part file or .ims file
         if os.path.exists(self.full_path_to_imaris_file):
             file_to_delete = self.full_path_to_imaris_file
+        elif os.path.exists(self.full_path_to_ims_part_file):
+            file_to_delete = self.full_path_to_ims_part_file
 
         # move broken imaris file to trash folder
         shutil.move(file_to_delete, os.path.join(trash_folder_ims, os.path.basename(file_to_delete)))
@@ -877,12 +880,22 @@ class Dataset:
         # move .imsqueue file to queue
         if self.in_imaris_queue():
             return
+
         complete_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'complete', f"*{self.job_number}*.txt.imsqueue"))
-        if len(complete_imsqueue_files) > 0:
-            shutil.move(
-                complete_imsqueue_files[0],
-                os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', os.path.basename(complete_imsqueue_files[0]))
-            )
+        error_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'error', f"*{self.job_number}*.txt.imsqueue"))
+        processing_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', f"*{self.job_number}*.txt.imsqueue"))
+
+        if len(complete_imsqueue_files) > 0:  # file is in the 'complete' folder by mistake
+            imsqueue_file_to_move = complete_imsqueue_files[0]
+        elif len(error_imsqueue_files) > 0:  # file is in the error folder
+            imsqueue_file_to_move = error_imsqueue_files[0]
+        elif len(processing_imsqueue_files) > 0:  # file is in the processing folder
+            imsqueue_file_to_move = processing_imsqueue_files[0]
+
+        shutil.move(
+            imsqueue_file_to_move,
+            os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', os.path.basename(complete_imsqueue_files[0]))
+        )
 
 
 class Found(BaseException):
