@@ -878,7 +878,7 @@ class Dataset:
         shutil.move(file_to_delete, os.path.join(trash_folder_ims, os.path.basename(file_to_delete)))
 
         # move .imsqueue file to queue
-        if self.in_imaris_queue():
+        if self.in_imaris_queue:
             return
 
         complete_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'complete', f"*{self.job_number}*.txt.imsqueue"))
