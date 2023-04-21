@@ -893,10 +893,9 @@ class Dataset:
         elif len(processing_imsqueue_files) > 0:  # file is in the processing folder
             imsqueue_file_to_move = processing_imsqueue_files[0]
 
-        shutil.move(
-            imsqueue_file_to_move,
-            os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', os.path.basename(complete_imsqueue_files[0]))
-        )
+        imsqueue_destination = os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', os.path.basename(imsqueue_file_to_move))
+        log.info(f"Moving {imsqueue_file_to_move} to {imsqueue_destination}")
+        shutil.move(imsqueue_file_to_move, imsqueue_destination)
 
 
 class Found(BaseException):
