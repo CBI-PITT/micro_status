@@ -671,6 +671,8 @@ class Dataset:
         return len(set(composite_sizes)) == 1
 
     def check_all_denoised_composites_present(self):
+        if not self.job_dir:
+            return False
         expected_composites = self.z_layers_total * self.channels
         print('expected denoised composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.job_dir, 'composite*.tif')))
@@ -755,7 +757,6 @@ class Dataset:
             else:
                 self.update_processing_summary({'building_ims': {'ims_size': current_ims_size}})
         else:
-            print("in_imaris_queue and ims_converter_works", self.in_imaris_queue and self.check_ims_converter_works())
             has_progress = self.in_imaris_queue and self.check_ims_converter_works()
             print("has_progress", has_progress)
         return has_progress
@@ -830,12 +831,12 @@ class Dataset:
         status = "started"
         if self.check_all_raw_composites_present() and self.check_all_raw_composites_same_size():
             status = "stitched"
-        else:
-            return status
+        # else:
+        #     return status
         if self.check_all_denoised_composites_present() and self.check_all_denoised_composites_same_size():
             status = "denoised"
-        else:
-            return status
+        # else:
+        #     return status
         if self.check_imaris_file_built():
             status = "built_ims"
         return status
