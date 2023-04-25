@@ -747,8 +747,8 @@ class Dataset:
         else:
             print("Partial ims file exists")
             current_ims_size = os.path.getsize(partial_ims_file)
-            has_progress = current_ims_size > previous_ims_size
-            print("current_ims_size > previous_ims_size", has_progress)
+            has_progress = current_ims_size != previous_ims_size  # the file building could start over
+            print("current_ims_size != previous_ims_size", has_progress)
         if has_progress:
             value_from_db = processing_summary.get('building_ims')
             if value_from_db:
