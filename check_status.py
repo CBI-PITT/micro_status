@@ -437,8 +437,8 @@ def check_processing():
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
                         dataset.send_message('ims_build_stuck')
-                        dataset.requeue_ims()
-                        dataset.send_message('requeue_ims')
+                        #dataset.requeue_ims()
+                        #dataset.send_message('requeue_ims')
         else:
             # ims file is not being built
             print("Imaris file is not being built")
@@ -516,6 +516,7 @@ def check_processing():
         has_progress = progress_methods_map[guessed_processing_status]()
         print("has progress", has_progress)
         if has_progress:
+            dataset.mark_has_processing_progress()
             dataset.update_processing_status(guessed_processing_status)
 
 
