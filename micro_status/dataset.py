@@ -229,13 +229,15 @@ class Dataset:
             # 'imaging_resumed': "Imaging of {} {} {} *_resumed_*",
             'processing_started': "Processing of {} {} {} started",
             'processing_finished': "Processing of {} {} {} finished",
-            'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}.*",
+            'broken_ims_file': "*WARNING: Broken Imaris file at {} {} {}. Requeuing.*",
             'stitching_error': "*WARNING: Stitching error {} {} {}. Txt file in error folder.*",
             'stitching_stuck': "*WARNING: Stitching of {} {} {} could be stuck. Check cluster.*",
             'denoising_stuck': "*WARNING: Denoising of {} {} {} could be stuck. Check CBPy.*",
-            'ims_build_stuck': "*WARNING: Building of Imaris file for {} {} {} could be stuck. Check conversion tool.*",
+            'ims_build_stuck': "*WARNING: Building of Imaris file for {} {} {} seems to be stuck.*",
             'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*",
-            'built_ims': "Imaris file built for {} {} {}. Check it out at {}"
+            'built_ims': "Imaris file built for {} {} {}. Check it out at {}",
+            'ignoring_demo_dataset': "Ignoring demo dataset {} {} {}",
+            'requeue_ims': "Requeuing ims build task for {} {} {}"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -669,6 +671,8 @@ class Dataset:
         return len(set(composite_sizes)) == 1
 
     def check_all_denoised_composites_present(self):
+        if not self.job_dir:
+            return False
         expected_composites = self.z_layers_total * self.channels
         print('expected denoised composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.job_dir, 'composite*.tif')))
@@ -743,8 +747,8 @@ class Dataset:
         else:
             print("Partial ims file exists")
             current_ims_size = os.path.getsize(partial_ims_file)
-            has_progress = current_ims_size > previous_ims_size
-            print("current_ims_size > previous_ims_size", has_progress)
+            has_progress = current_ims_size != previous_ims_size  # the file building could start over
+            print("current_ims_size != previous_ims_size", has_progress)
         if has_progress:
             value_from_db = processing_summary.get('building_ims')
             if value_from_db:
@@ -753,7 +757,6 @@ class Dataset:
             else:
                 self.update_processing_summary({'building_ims': {'ims_size': current_ims_size}})
         else:
-            print("in_imaris_queue and ims_converter_works", self.in_imaris_queue and self.check_ims_converter_works())
             has_progress = self.in_imaris_queue and self.check_ims_converter_works()
             print("has_progress", has_progress)
         return has_progress
@@ -828,12 +831,12 @@ class Dataset:
         status = "started"
         if self.check_all_raw_composites_present() and self.check_all_raw_composites_same_size():
             status = "stitched"
-        else:
-            return status
+        # else:
+        #     return status
         if self.check_all_denoised_composites_present() and self.check_all_denoised_composites_same_size():
             status = "denoised"
-        else:
-            return status
+        # else:
+        #     return status
         if self.check_imaris_file_built():
             status = "built_ims"
         return status
@@ -857,6 +860,42 @@ class Dataset:
     @property
     def in_imaris_queue(self):
         return len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', f"*{self.job_number}*.txt.imsqueue"))) > 0
+
+    def requeue_ims(self):
+        if self.full_path_to_imaris_file.startswith('/CBI_FastStore'):
+            trash_location = FASTSTORE_TRASH_LOCATION
+        else:
+            trash_location = HIVE_TRASH_LOCATION
+        trash_folder_ims = os.path.join(trash_location, self.pi, self.cl_number, self.name, f"ims_{datetime.now().strftime(DATETIME_FORMAT)}")
+        os.makedirs(trash_folder_ims)
+
+        # check whether it is .ims.part file or .ims file
+        if os.path.exists(self.full_path_to_imaris_file):
+            file_to_delete = self.full_path_to_imaris_file
+        elif os.path.exists(self.full_path_to_ims_part_file):
+            file_to_delete = self.full_path_to_ims_part_file
+
+        # move broken imaris file to trash folder
+        shutil.move(file_to_delete, os.path.join(trash_folder_ims, os.path.basename(file_to_delete)))
+
+        # move .imsqueue file to queue
+        if self.in_imaris_queue:
+            return
+
+        complete_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'complete', f"*{self.job_number}*.txt.imsqueue"))
+        error_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'error', f"*{self.job_number}*.txt.imsqueue"))
+        processing_imsqueue_files = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', f"*{self.job_number}*.txt.imsqueue"))
+
+        if len(complete_imsqueue_files) > 0:  # file is in the 'complete' folder by mistake
+            imsqueue_file_to_move = complete_imsqueue_files[0]
+        elif len(error_imsqueue_files) > 0:  # file is in the error folder
+            imsqueue_file_to_move = error_imsqueue_files[0]
+        elif len(processing_imsqueue_files) > 0:  # file is in the processing folder
+            imsqueue_file_to_move = processing_imsqueue_files[0]
+
+        imsqueue_destination = os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', os.path.basename(imsqueue_file_to_move))
+        log.info(f"Moving {imsqueue_file_to_move} to {imsqueue_destination}")
+        shutil.move(imsqueue_file_to_move, imsqueue_destination)
 
 
 class Found(BaseException):

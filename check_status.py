@@ -186,6 +186,14 @@ def check_imaging():
             log.info("-----------------------New dataset--------------------------")
             dataset = Dataset.create(file_path)
             log.info(dataset.path_on_fast_store)
+            if "demo" in dataset.name:
+                # demo dataset
+                log.info(f"Ignoring demo dataset {dataset}")
+                print(f"Ignoring demo dataset {dataset}")
+                dataset.send_message('ignoring_demo_dataset')
+                dataset.mark_imaging_finished()
+                dataset.update_processing_status('finished')
+                continue
             dataset.send_message('imaging_started')
         else:
             dataset = read_dataset_record(file_path)
@@ -397,6 +405,7 @@ def check_processing():
                 log.error(f"ERROR opening imaris file: {e}")
                 dataset.send_message("broken_ims_file")
                 dataset.update_processing_status('paused')
+                dataset.requeue_ims()
 
                 # update ims_size=0 in processing_summary
                 processing_summary = dataset.get_processing_summary()
@@ -428,6 +437,8 @@ def check_processing():
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
                         dataset.send_message('ims_build_stuck')
+                        #dataset.requeue_ims()
+                        #dataset.send_message('requeue_ims')
         else:
             # ims file is not being built
             print("Imaris file is not being built")
@@ -505,6 +516,7 @@ def check_processing():
         has_progress = progress_methods_map[guessed_processing_status]()
         print("has progress", has_progress)
         if has_progress:
+            dataset.mark_has_processing_progress()
             dataset.update_processing_status(guessed_processing_status)
 
 
