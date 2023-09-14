@@ -43,6 +43,8 @@ class Dataset:
         self.z_layers_checked = kwargs.get('z_layers_checked')
         self.keep_composites = kwargs.get('keep_composites')
         self.delete_405 = kwargs.get('delete_405')
+        self.is_brain = kwargs.get('is_brain')
+        self.peace_json_created = kwargs.get('peace_json_created')
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
@@ -152,7 +154,9 @@ class Dataset:
             imaging_no_progress_time=None,
             processing_no_progress_time=None,
             keep_composites=0,
-            delete_405=0
+            delete_405=0,
+            is_brain=0,
+            peace_json_created=None
         )
         return dataset
 
@@ -237,7 +241,8 @@ class Dataset:
             'broken_tiff_file': "*WARNING: Broken tiff file in {} {} {} z-layer {}*",
             'built_ims': "Imaris file built for {} {} {}. Check it out at {}",
             'ignoring_demo_dataset': "Ignoring demo dataset {} {} {}",
-            'requeue_ims': "Requeuing ims build task for {} {} {}"
+            'requeue_ims': "Requeuing ims build task for {} {} {}",
+            'peace_json_created': "Created analysis task for brain dataset {} {} {}"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -404,7 +409,9 @@ class Dataset:
             processing_no_progress_time = record[17],
             z_layers_checked = record[19],
             keep_composites = record[20],
-            delete_405 = record[21]
+            delete_405 = record[21],
+            is_brain=record[22],
+            peace_json_created=record[23]
         )
         return obj
 
@@ -896,6 +903,40 @@ class Dataset:
         imsqueue_destination = os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', os.path.basename(imsqueue_file_to_move))
         log.info(f"Moving {imsqueue_file_to_move} to {imsqueue_destination}")
         shutil.move(imsqueue_file_to_move, imsqueue_destination)
+
+    def create_peace_json(self):
+        print("Creating PEACE JSON")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        comp_name = "deneb"
+        json_path = os.path.join(PEACE_JSON_FOLDER, f'{comp_name}_settings{timestamp}.json')
+        actions = ['extract_tiff_series', 'detect_cells']
+
+        current_path = Path(self.full_path_to_imaris_file)
+        for level in range(len(current_path.parents) - 1):
+            current_path = current_path.parent
+            presumable_out_folder = current_path / 'analysis'
+            if os.path.exists(str(presumable_out_folder)):
+                break
+        else:
+            presumable_out_folder = os.path.join(HIVE_ACQUISITION_FOLDER, self.pi, self.cl_number, 'analysis')
+        print("presumable_out_folder", presumable_out_folder)
+        settings = {
+            'ims_file': str(self.full_path_to_imaris_file),
+            'actions': actions,
+            'output_folder': str(presumable_out_folder),
+        }
+        with open(json_path, 'w') as f:
+            f.write(json.dumps(settings))
+        print("Created JSON")
+        json_created_time = datetime.now().strftime(DATETIME_FORMAT)
+        self.peace_json_created = json_created_time
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'UPDATE dataset SET peace_json_created = "{json_created_time}" WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.send_message('peace_json_created')
 
 
 class Found(BaseException):
