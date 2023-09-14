@@ -35,3 +35,4 @@ DATA_LOCATION = {
     'hive': HIVE_ACQUISITION_FOLDER
 }
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
+PEACE_JSON_FOLDER = "/CBI_Hive/CBI/Iana/json"

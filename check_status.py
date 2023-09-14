@@ -594,12 +594,30 @@ def check_storage():
     check(faststore_used_percent, "faststore")
 
 
+def check_analysis():
+    """
+    If the finished dataset is a brain, send it for analysis by PEACE pipeline
+    """
+    print("Checking analysis...")
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        f'SELECT * FROM dataset WHERE processing_status="finished" AND is_brain=1'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+        print("Brain dataset", dataset)
+        if not dataset.peace_json_created:
+            dataset.create_peace_json()
+
+
 def scan():
     try:
         check_storage()
         check_imaging()
         check_processing()
         # TODO db_cleanup()
+        check_analysis()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
 
