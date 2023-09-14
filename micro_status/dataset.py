@@ -77,6 +77,10 @@ class Dataset:
             con.commit()
             con.close()
 
+        is_brain_dataset = 0
+        if pi_name.lower() in BRAIN_DATA_PRODUCERS:
+            is_brain_dataset = 1
+
         cl_number = [x for x in path_parts if 'CL' in x.upper()]
         cl_number = None if len(cl_number) == 0 else cl_number[0]
         con = sqlite3.connect(DB_LOCATION)
@@ -129,9 +133,10 @@ class Dataset:
         cur = con.cursor()
         res = cur.execute(
             f'''INSERT OR IGNORE INTO dataset(name, path_on_fast_store, vs_series_file, cl_number, pi, 
-        imaging_status, processing_status, channels, z_layers_total, z_layers_current, ribbons_total, ribbons_finished) 
+        imaging_status, processing_status, channels, z_layers_total, z_layers_current, ribbons_total, ribbons_finished, is_brain)
         VALUES("{dataset_name}", "{file_path}", "{vs_series_file_id}", "{cl_number_id}", "{pi_id}", 
-        "in_progress", "not_started", "{channels}", "{z_layers}", "{current_z_layer}", "{ribbons_total}", "{ribbons_finished}")
+        "in_progress", "not_started", "{channels}", "{z_layers}", "{current_z_layer}", "{ribbons_total}", "{ribbons_finished}",
+        "{is_brain_dataset}")
         '''
         )
         dataset_id = cur.lastrowid
@@ -155,7 +160,7 @@ class Dataset:
             processing_no_progress_time=None,
             keep_composites=0,
             delete_405=0,
-            is_brain=0,
+            is_brain=is_brain_dataset,
             peace_json_created=None
         )
         return dataset

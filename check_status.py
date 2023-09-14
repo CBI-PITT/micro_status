@@ -111,6 +111,9 @@ log = logging.getLogger(__name__)
 
 
 def check_if_new(file_path):
+    """
+    Check that vs_series file with given path is not in the database.
+    """
     con = sqlite3.connect(DB_LOCATION)
     con.row_factory = lambda cursor, row: row[0]
     cur = con.cursor()
@@ -162,7 +165,9 @@ def read_dataset_record(file_path):
         processing_no_progress_time = record[17],
         z_layers_checked = record[19],
         keep_composites = record[20],
-        delete_405 = record[21]
+        delete_405 = record[21],
+        is_brain=record[22],
+        peace_json_created=record[23]
     )
     return dataset
 

@@ -36,3 +36,4 @@ DATA_LOCATION = {
 }
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 PEACE_JSON_FOLDER = "/CBI_Hive/CBI/Iana/json"
+BRAIN_DATA_PRODUCERS = ["klimstra", "cebra", "dutta", "dermody"]
