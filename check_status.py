@@ -377,6 +377,7 @@ def check_processing():
             print('denoising_finished', denoising_finished)
             if denoising_finished:
                 dataset.update_processing_status('denoised')
+                dataset.clean_up_raw_composites()
                 continue
             denoising_has_progress = dataset.check_denoising_progress()
             print('denoising_has_progress', denoising_has_progress)
@@ -423,7 +424,7 @@ def check_processing():
                 dataset.update_processing_status('built_ims')
                 dataset.send_message('built_ims')
                 if not dataset.keep_composites:
-                    dataset.clean_up_composites()
+                    dataset.clean_up_denoised_composites()
                 dataset.start_moving()
         # elif os.path.exists(dataset.full_path_to_ims_part_file) and os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', dataset.imsqueue_file_name)):
         elif os.path.exists(dataset.full_path_to_ims_part_file) and len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', f"*{dataset.job_number}*.txt.imsqueue"))):

@@ -346,15 +346,11 @@ class Dataset:
         log.info("-----------------------Queue processing. Text file : ---------------------")
         log.info(contents)
 
-    def clean_up_composites(self):
-        log.info("---------------------Cleaning up composites--------------------")
-        # if self.path_on_hive and self.imaris_file_path:
+    def clean_up_raw_composites(self):
+        log.info("---------------------Cleaning up raw composites--------------------")
         log.info(f"composites_dir: {self.composites_dir}")
-        log.info(f"job_dir: {self.job_dir}")
-        if not self.composites_dir or not self.job_dir:
+        if not self.composites_dir:
             return
-        denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
-        log.info(f"denoised_composites: {len(denoised_composites)}")
         raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
         log.info(f"raw_composites: {len(raw_composites)}")
         if self.full_path_to_imaris_file.startswith('/CBI_FastStore'):
@@ -364,13 +360,25 @@ class Dataset:
         trash_folder_raw = os.path.join(trash_location, self.pi, self.cl_number, self.name, "raw_composites")
         if not os.path.exists(trash_folder_raw):
             os.makedirs(trash_folder_raw)
-        trash_folder_denoised = os.path.join(trash_location, self.pi, self.cl_number, self.name, "denoised_composites")
-        if not os.path.exists(trash_folder_denoised):
-            os.makedirs(trash_folder_denoised)
         for f in raw_composites:
             log.info(f"move to trash: {f}")
             trash_path = os.path.join(trash_folder_raw, os.path.basename(f))
             shutil.move(f, trash_path)
+
+    def clean_up_denoised_composites(self):
+        log.info("---------------------Cleaning up denoised composites--------------------")
+        log.info(f"job_dir: {self.job_dir}")
+        if not self.job_dir:
+            return
+        denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
+        log.info(f"denoised_composites: {len(denoised_composites)}")
+        if self.full_path_to_imaris_file.startswith('/CBI_FastStore'):
+            trash_location = FASTSTORE_TRASH_LOCATION
+        else:
+            trash_location = HIVE_TRASH_LOCATION
+        trash_folder_denoised = os.path.join(trash_location, self.pi, self.cl_number, self.name, "denoised_composites")
+        if not os.path.exists(trash_folder_denoised):
+            os.makedirs(trash_folder_denoised)
         for f in denoised_composites:
             log.info(f"move to trash: {f}")
             trash_path = os.path.join(trash_folder_denoised, os.path.basename(f))
