@@ -219,7 +219,8 @@ def check_imaging():
                     if dataset.delete_405:
                         print("------------Deleting 405 channel")
                         dataset.delete_channel_405()
-                    dataset.start_processing()
+                    if '_cont_' not in dataset.name:
+                        dataset.start_processing()
                     continue
                 print("Imaging has progress:", has_progress)
                 if has_progress:
