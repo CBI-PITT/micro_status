@@ -591,7 +591,7 @@ def check_storage():
     output = ret.stdout.decode()
     output_rows = output.split('\n')
     beegfs_nodes = [x for x in output_rows if x.startswith('beegfs')]
-    hive = [x for x in beegfs_nodes if x.endswith('Hive')][0]
+    hive = [x for x in beegfs_nodes if x.endswith('h20')][0]
     faststore = [x for x in beegfs_nodes if x.endswith('FastStore')][0]
     faststore_used_percent_str = [x for x in faststore.split() if x.endswith("%")][0]
     hive_used_percent_str = [x for x in hive.split() if x.endswith("%")][0]
@@ -627,6 +627,7 @@ def scan():
         check_analysis()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
+        print(e.__traceback__)
 
     print("========================== Waiting 30 seconds ========================")
     time.sleep(30)

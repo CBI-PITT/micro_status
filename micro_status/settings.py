@@ -18,7 +18,7 @@ RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 RSCM_FOLDER_BUILDING_IMS = "/CBI_FastStore/clusterStitch"
 CBPY_FOLDER = "/CBI_FastStore/clusterPy"
 DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
-CHROME_DRIVER_PATH = '/CBI_Hive/CBI/Iana/projects/internal/micro_status/chromedriver'
+CHROME_DRIVER_PATH = '/h20/CBI/Iana/projects/internal/micro_status/chromedriver'
 MAX_ALLOWED_STORAGE_PERCENT = 94
 STORAGE_THRESHOLD_0 = 85
 STORAGE_THRESHOLD_1 = 90
@@ -35,5 +35,5 @@ DATA_LOCATION = {
     'hive': HIVE_ACQUISITION_FOLDER
 }
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
-PEACE_JSON_FOLDER = "/CBI_Hive/CBI/Iana/json"
+PEACE_JSON_FOLDER = "/h20/CBI/Iana/json"
 BRAIN_DATA_PRODUCERS = ["klimstra", "cebra", "dutta", "dermody"]
