@@ -1,4 +1,5 @@
 import os
+import json
 
 from dotenv import load_dotenv
 
@@ -17,7 +18,7 @@ PROGRESS_TIMEOUT = 600  # seconds
 RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 RSCM_FOLDER_BUILDING_IMS = "/CBI_FastStore/clusterStitch"
 CBPY_FOLDER = "/CBI_FastStore/clusterPy"
-DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
+# DASK_DASHBOARD = os.getenv("DASK_DASHBOARD")
 CHROME_DRIVER_PATH = '/h20/CBI/Iana/projects/internal/micro_status/chromedriver'
 MAX_ALLOWED_STORAGE_PERCENT = 94
 STORAGE_THRESHOLD_0 = 85
@@ -37,3 +38,6 @@ DATA_LOCATION = {
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 PEACE_JSON_FOLDER = "/h20/CBI/Iana/json"
 BRAIN_DATA_PRODUCERS = ["klimstra", "cebra", "dutta", "dermody"]
+
+dask_json = json.load(open("/CBI_FastStore/cbiPythonTools/RSCM/RSCM/dask_scheduler_info.json", "r"))
+DASK_DASHBOARD = dask_json['address'].replace("tcp", "http")[:-4] + '8787/'

@@ -79,6 +79,7 @@ import shutil
 import subprocess
 import sqlite3
 import time
+import traceback
 from datetime import datetime
 from glob import glob
 from pathlib import Path, PureWindowsPath
@@ -627,7 +628,7 @@ def scan():
         check_analysis()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
-        print(e.__traceback__)
+        print(traceback.format_exc())
 
     print("========================== Waiting 30 seconds ========================")
     time.sleep(30)
