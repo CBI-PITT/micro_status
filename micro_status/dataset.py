@@ -60,7 +60,7 @@ class Dataset:
 
         file_path = Path(file_path)
         path_parts = file_path.parts
-        last_name_pattern = r"^[A-Za-z '-]+$"
+        last_name_pattern = r"^[A-Za-z '-_]+$"
         pi_name = path_parts[3] if re.findall(last_name_pattern, path_parts[3]) else None
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
