@@ -380,6 +380,7 @@ def check_processing():
             if denoising_finished:
                 dataset.update_processing_status('denoised')
                 dataset.clean_up_raw_composites()
+                dataset.start_moving()
                 continue
             denoising_has_progress = dataset.check_denoising_progress()
             print('denoising_has_progress', denoising_has_progress)
@@ -427,7 +428,7 @@ def check_processing():
                 dataset.send_message('built_ims')
                 if not dataset.keep_composites:
                     dataset.clean_up_denoised_composites()
-                dataset.start_moving()
+                # dataset.start_moving()
         # elif os.path.exists(dataset.full_path_to_ims_part_file) and os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', dataset.imsqueue_file_name)):
         elif os.path.exists(dataset.full_path_to_ims_part_file) and len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', f"*{dataset.job_number}*.txt.imsqueue"))):
             # Building of ims file in-progress
@@ -526,6 +527,11 @@ def check_processing():
         if has_progress:
             dataset.mark_has_processing_progress()
             dataset.update_processing_status(guessed_processing_status)
+        print("guessed_processing_status", guessed_processing_status)
+        print("dataset.job_dir", dataset.job_dir)
+        print("os.path.exists(dataset.job_dir)", os.path.exists(dataset.job_dir))
+        if guessed_processing_status == "denoised" and dataset.job_dir.startswith('/CBI_FastStore') and os.path.exists(dataset.job_dir):
+            dataset.start_moving()
 
 
 def check_storage():
@@ -632,6 +638,14 @@ def scan():
 
     print("========================== Waiting 30 seconds ========================")
     time.sleep(30)
+
+
+def scan_debug():
+    check_storage()
+    check_imaging()
+    check_processing()
+    # TODO db_cleanup()
+    check_analysis()
 
 
 if __name__ == "__main__":

@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
-HIVE_ACQUISITION_FOLDER = "/CBI_Hive/Acquire"
+HIVE_ACQUISITION_FOLDER = "/h20/Acquire"
 DB_LOCATION = "/CBI_FastStore/Iana/RSCM_datasets.db"
 FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
-HIVE_TRASH_LOCATION = "/CBI_Hive/trash"
+HIVE_TRASH_LOCATION = "/h20/trash"
 
 SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()
@@ -29,7 +29,7 @@ WHERE_PROCESSING_HAPPENS = {
     'stitch': 'faststore',
     'build_composites': 'faststore',
     'denoise': 'faststore',
-    'build_ims': 'faststore'
+    'build_ims': 'hive'
 }
 DATA_LOCATION = {
     'faststore': FASTSTORE_ACQUISITION_FOLDER,

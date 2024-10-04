@@ -254,7 +254,7 @@ class Dataset:
         elif msg_type == 'built_ims':
             imaris_file_path = self.full_path_to_imaris_file
             # ims_folder = str(PureWindowsPath(str(Path(imaris_file_path).parent).replace('/CBI_Hive', 'H:')))
-            ims_folder = str(PureWindowsPath(str(Path(imaris_file_path).parent).replace('/CBI_Hive', 'H:').replace('/CBI_FastStore', 'Z:')))
+            ims_folder = str(PureWindowsPath(str(Path(imaris_file_path).parent).replace('/h20', 'H:').replace('/CBI_FastStore', 'Z:')))
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
@@ -866,7 +866,7 @@ class Dataset:
 
     def start_moving(self):
         """create txt file in the RSCM queue stitch directory
-        file name: {dataset_id}_{pi_name}_{cl_number}_{dataset_name}.txt
+        file name: {dataset_id}_{pi_name}_{cl_number}_{dataset_name}_move.txt
         this way the earlier datasets go in first
         """
         dat_file_path = Path(self.path_on_fast_store)
