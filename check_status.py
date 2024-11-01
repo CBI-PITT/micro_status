@@ -92,6 +92,7 @@ from imaris_ims_file_reader import ims
 from micro_status.dataset import Dataset
 from micro_status.settings import *  # TODO replace this with normal import
 from micro_status.warning import Warning
+from micro_status.utils import can_be_moved
 
 
 console_handler = logging.StreamHandler()
@@ -377,7 +378,7 @@ def check_processing():
 
             denoising_finished = dataset.check_denoising_finished()
             print('denoising_finished', denoising_finished)
-            if denoising_finished:
+            if denoising_finished and can_be_moved():
                 dataset.update_processing_status('denoised')
                 dataset.clean_up_raw_composites()
                 dataset.start_moving()
@@ -445,7 +446,7 @@ def check_processing():
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
-                        dataset.send_message('ims_build_stuck')
+                        # dataset.send_message('ims_build_stuck')
                         #dataset.requeue_ims()
                         #dataset.send_message('requeue_ims')
         else:
@@ -463,7 +464,7 @@ def check_processing():
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
-                        dataset.send_message('ims_build_stuck')
+                        # dataset.send_message('ims_build_stuck')
 
             # check what other file is being processed, check its size
             ims_converter_works = dataset.check_ims_converter_works()
@@ -478,7 +479,7 @@ def check_processing():
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
-                        dataset.send_message('ims_build_stuck')
+                        # dataset.send_message('ims_build_stuck')
 
     # Eventually datasets should be on hive
     records = cur.execute(

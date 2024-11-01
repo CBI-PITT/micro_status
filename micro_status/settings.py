@@ -41,3 +41,5 @@ BRAIN_DATA_PRODUCERS = ["klimstra", "cebra", "dutta", "dermody"]
 
 dask_json = json.load(open("/CBI_FastStore/cbiPythonTools/RSCM/RSCM/dask_scheduler_info.json", "r"))
 DASK_DASHBOARD = dask_json['address'].replace("tcp", "http")[:-4] + '8787/'
+RESTRICT_MOVING_TIME = True
+MOVE_TIMES = {'start': '0', 'stop': '7'}
