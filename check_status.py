@@ -79,6 +79,7 @@ import shutil
 import subprocess
 import sqlite3
 import time
+import traceback
 from datetime import datetime
 from glob import glob
 from pathlib import Path, PureWindowsPath
@@ -91,6 +92,7 @@ from imaris_ims_file_reader import ims
 from micro_status.dataset import Dataset
 from micro_status.settings import *  # TODO replace this with normal import
 from micro_status.warning import Warning
+from micro_status.utils import can_be_moved
 
 
 console_handler = logging.StreamHandler()
@@ -111,6 +113,9 @@ log = logging.getLogger(__name__)
 
 
 def check_if_new(file_path):
+    """
+    Check that vs_series file with given path is not in the database.
+    """
     con = sqlite3.connect(DB_LOCATION)
     con.row_factory = lambda cursor, row: row[0]
     cur = con.cursor()
@@ -162,7 +167,9 @@ def read_dataset_record(file_path):
         processing_no_progress_time = record[17],
         z_layers_checked = record[19],
         keep_composites = record[20],
-        delete_405 = record[21]
+        delete_405 = record[21],
+        is_brain=record[22],
+        peace_json_created=record[23]
     )
     return dataset
 
@@ -214,7 +221,8 @@ def check_imaging():
                     if dataset.delete_405:
                         print("------------Deleting 405 channel")
                         dataset.delete_channel_405()
-                    dataset.start_processing()
+                    if '_cont_' not in dataset.name:
+                        dataset.start_processing()
                     continue
                 print("Imaging has progress:", has_progress)
                 if has_progress:
@@ -370,8 +378,10 @@ def check_processing():
 
             denoising_finished = dataset.check_denoising_finished()
             print('denoising_finished', denoising_finished)
-            if denoising_finished:
+            if denoising_finished and can_be_moved():
                 dataset.update_processing_status('denoised')
+                dataset.clean_up_raw_composites()
+                dataset.start_moving()
                 continue
             denoising_has_progress = dataset.check_denoising_progress()
             print('denoising_has_progress', denoising_has_progress)
@@ -418,8 +428,8 @@ def check_processing():
                 dataset.update_processing_status('built_ims')
                 dataset.send_message('built_ims')
                 if not dataset.keep_composites:
-                    dataset.clean_up_composites()
-                dataset.start_moving()
+                    dataset.clean_up_denoised_composites()
+                # dataset.start_moving()
         # elif os.path.exists(dataset.full_path_to_ims_part_file) and os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', dataset.imsqueue_file_name)):
         elif os.path.exists(dataset.full_path_to_ims_part_file) and len(glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', f"*{dataset.job_number}*.txt.imsqueue"))):
             # Building of ims file in-progress
@@ -436,7 +446,7 @@ def check_processing():
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
-                        dataset.send_message('ims_build_stuck')
+                        # dataset.send_message('ims_build_stuck')
                         #dataset.requeue_ims()
                         #dataset.send_message('requeue_ims')
         else:
@@ -454,7 +464,7 @@ def check_processing():
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
-                        dataset.send_message('ims_build_stuck')
+                        # dataset.send_message('ims_build_stuck')
 
             # check what other file is being processed, check its size
             ims_converter_works = dataset.check_ims_converter_works()
@@ -469,7 +479,7 @@ def check_processing():
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('paused')
-                        dataset.send_message('ims_build_stuck')
+                        # dataset.send_message('ims_build_stuck')
 
     # Eventually datasets should be on hive
     records = cur.execute(
@@ -518,6 +528,11 @@ def check_processing():
         if has_progress:
             dataset.mark_has_processing_progress()
             dataset.update_processing_status(guessed_processing_status)
+        print("guessed_processing_status", guessed_processing_status)
+        print("dataset.job_dir", dataset.job_dir)
+        print("os.path.exists(dataset.job_dir)", os.path.exists(dataset.job_dir))
+        if guessed_processing_status == "denoised" and dataset.job_dir.startswith('/CBI_FastStore') and os.path.exists(dataset.job_dir):
+            dataset.start_moving()
 
 
 def check_storage():
@@ -584,7 +599,7 @@ def check_storage():
     output = ret.stdout.decode()
     output_rows = output.split('\n')
     beegfs_nodes = [x for x in output_rows if x.startswith('beegfs')]
-    hive = [x for x in beegfs_nodes if x.endswith('Hive')][0]
+    hive = [x for x in beegfs_nodes if x.endswith('h20')][0]
     faststore = [x for x in beegfs_nodes if x.endswith('FastStore')][0]
     faststore_used_percent_str = [x for x in faststore.split() if x.endswith("%")][0]
     hive_used_percent_str = [x for x in hive.split() if x.endswith("%")][0]
@@ -594,17 +609,44 @@ def check_storage():
     check(faststore_used_percent, "faststore")
 
 
+def check_analysis():
+    """
+    If the finished dataset is a brain, send it for analysis by PEACE pipeline
+    """
+    print("Checking analysis...")
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        f'SELECT * FROM dataset WHERE processing_status="finished" AND is_brain=1'
+    ).fetchall()
+    for record in records:
+        dataset = Dataset.initialize_from_db(record)
+        print("Brain dataset", dataset)
+        if not dataset.peace_json_created:
+            dataset.create_peace_json()
+
+
 def scan():
     try:
         check_storage()
         check_imaging()
         check_processing()
         # TODO db_cleanup()
+        check_analysis()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
+        print(traceback.format_exc())
 
     print("========================== Waiting 30 seconds ========================")
     time.sleep(30)
+
+
+def scan_debug():
+    check_storage()
+    check_imaging()
+    check_processing()
+    # TODO db_cleanup()
+    check_analysis()
 
 
 if __name__ == "__main__":

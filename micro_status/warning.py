@@ -46,10 +46,13 @@ class Warning:
     def send_message(self):
         msg_map = {
             'low_space_hive': f":exclamation: *WARNING: Critically low space on Hive (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
+            'low_space_h20': f":exclamation: *WARNING: Critically low space on h20 (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
             'low_space_faststore': f":exclamation: *WARNING: Critically low space on FastStore (more than {MAX_ALLOWED_STORAGE_PERCENT}% used)*",
             'space_hive_thr0': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_0}% used)*",
+            'space_h20_thr0': f":exclamation: *WARNING: Low space on h20 (more than {STORAGE_THRESHOLD_0}% used)*",
             'space_faststore_thr0': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_0}% used)*",
             'space_hive_thr1': f":exclamation: *WARNING: Low space on Hive (more than {STORAGE_THRESHOLD_1}% used)*",
+            'space_h20_thr1': f":exclamation: *WARNING: Low space on h20 (more than {STORAGE_THRESHOLD_1}% used)*",
             'space_faststore_thr1': f":exclamation: *WARNING: Low space on FastStore (more than {STORAGE_THRESHOLD_1}% used)*",
         }
         msg_text = msg_map[self.type]

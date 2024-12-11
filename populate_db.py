@@ -64,7 +64,7 @@ CREATE TABLE `warning` (
 
 
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
-DB_FILE = '/CBI_Hive/CBI/Iana/projects/internal/RSCM_datasets'
+DB_FILE = '/h20/CBI/Iana/projects/internal/RSCM_datasets'
 
 # Discover all vs_series.dat files in the acquisition directory
 print("Looking for vs_series files...")
