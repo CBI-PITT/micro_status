@@ -4,9 +4,10 @@ import json
 from dotenv import load_dotenv
 
 
-FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/RSCM"
+RSCM_FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/RSCM"
+MESOSPIM_FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/MesoSPIM"
 HIVE_ACQUISITION_FOLDER = "/h20/Acquire/RSCM"
-DB_LOCATION = "/CBI_FastStore/Iana/RSCM_datasets.db"
+DB_LOCATION = "/CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db"
 FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
 HIVE_TRASH_LOCATION = "/h20/trash"
 
@@ -32,7 +33,7 @@ WHERE_PROCESSING_HAPPENS = {
     'build_ims': 'hive'
 }
 DATA_LOCATION = {
-    'faststore': FASTSTORE_ACQUISITION_FOLDER,
+    'faststore': RSCM_FASTSTORE_ACQUISITION_FOLDER,
     'hive': HIVE_ACQUISITION_FOLDER
 }
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"

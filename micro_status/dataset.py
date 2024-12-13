@@ -30,38 +30,30 @@ class Dataset:
         self.imaging_status = kwargs.get('imaging_status')
         self.processing_status = kwargs.get('processing_status')
         self.path_on_hive = kwargs.get('path_on_hive')
-        self.job_number = kwargs.get('job_number')
+        # self.job_number = kwargs.get('job_number')
         self.imaris_file_path = kwargs.get('imaris_file_path')
         self.channels = kwargs.get('channels')
-        self.z_layers_total = kwargs.get('z_layers_total')
-        self.z_layers_current = kwargs.get('z_layers_current')
-        self.z_layers_checked = kwargs.get('z_layers_checked')
-        self.ribbons_total = kwargs.get('ribbons_total')
-        self.ribbons_finished = kwargs.get('ribbons_finished')
+        # self.z_layers_total = kwargs.get('z_layers_total')
+        # self.z_layers_current = kwargs.get('z_layers_current')
+        # self.z_layers_checked = kwargs.get('z_layers_checked')
+        # self.ribbons_total = kwargs.get('ribbons_total')
+        # self.ribbons_finished = kwargs.get('ribbons_finished')
         self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
         self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
-        self.z_layers_checked = kwargs.get('z_layers_checked')
-        self.keep_composites = kwargs.get('keep_composites')
-        self.delete_405 = kwargs.get('delete_405')
-        self.is_brain = kwargs.get('is_brain')
-        self.peace_json_created = kwargs.get('peace_json_created')
+        # self.keep_composites = kwargs.get('keep_composites')
+        # self.delete_405 = kwargs.get('delete_405')
+        self.is_brain = kwargs.get('is_brain', False)
+        self.peace_json_created = kwargs.get('peace_json_created', False)
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
 
     @classmethod
     def create(cls, file_path):
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'INSERT OR IGNORE INTO vsseriesfile(path) VALUES("{file_path}")')
-        vs_series_file_id = cur.lastrowid
-        con.commit()
-        con.close()
-
-        file_path = Path(file_path)
+        file_path = Path(file_path)   # TODO remove RSCM_FASTSTORE_ACQUISITION_FOLDER from the path
         path_parts = file_path.parts
         last_name_pattern = r"^[A-Za-z '-_]+$"
-        pi_name = path_parts[3] if re.findall(last_name_pattern, path_parts[3]) else None
+        pi_name = path_parts[4] if re.findall(last_name_pattern, path_parts[4]) else None  # TODO make it more general
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'SELECT id FROM pi WHERE name = "{pi_name}"')
@@ -82,7 +74,7 @@ class Dataset:
             is_brain_dataset = 1
 
         cl_number = [x for x in path_parts if 'CL' in x.upper()]
-        cl_number = None if len(cl_number) == 0 else cl_number[0]
+        cl_number = '00CL00' if len(cl_number) == 0 else cl_number[0]
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'SELECT id FROM clnumber WHERE name = "{cl_number}"')
@@ -99,44 +91,17 @@ class Dataset:
             con.commit()
             con.close()
 
-        dataset_name = file_path.parent.name if "stack" in file_path.parent.name else None
+        dataset_name = path_parts[-1]
 
         print("Path", file_path, "pi_name", pi_name, "cl_number", cl_number, "dataset_name", dataset_name)
-
-        with open(file_path, 'r') as f:
-            data = f.read()
-
-        soup = BeautifulSoup(data, "xml")
-        z_layers = int(soup.find('stack_slice_count').text)
-        ribbons_in_z_layer = int(soup.find('grid_cols').text)
-        # layer_dirs = [x.path for x in os.scandir(file_path.parent) if x.is_dir()]
-        # for layer in range(int(z_layers) -1, 0, -1):
-
-        ribbons_finished = 0
-        subdirs = os.scandir(file_path.parent)
-        for subdir in subdirs:
-            if subdir.is_file() or 'layer' not in subdir.name:
-                continue
-            color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
-            channels = len(color_dirs)
-            for color_dir in color_dirs:
-                images_dir = os.path.join(color_dir, 'images')
-                ribbons = len(os.listdir(images_dir))
-                ribbons_finished += ribbons
-                if ribbons < ribbons_in_z_layer:
-                    break
-        current_z_layer = re.findall(r"\d+", subdir.name)[-1]
-        # imaging_status = "finished" if current_z_layer == z_layers else "in_progress"
-        ribbons_total = z_layers * channels * ribbons_in_z_layer
 
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(
-            f'''INSERT OR IGNORE INTO dataset(name, path_on_fast_store, vs_series_file, cl_number, pi, 
-        imaging_status, processing_status, channels, z_layers_total, z_layers_current, ribbons_total, ribbons_finished, is_brain)
-        VALUES("{dataset_name}", "{file_path}", "{vs_series_file_id}", "{cl_number_id}", "{pi_id}", 
-        "in_progress", "not_started", "{channels}", "{z_layers}", "{current_z_layer}", "{ribbons_total}", "{ribbons_finished}",
-        "{is_brain_dataset}")
+            f'''INSERT OR IGNORE INTO dataset(name, path_on_fast_store, cl_number, pi, 
+        imaging_status, processing_status, created)
+        VALUES("{dataset_name}", "{file_path}", "{cl_number_id}", "{pi_id}", 
+        "in_progress", "not_started", "{datetime.now().strftime(DATETIME_FORMAT)}")
         '''
         )
         dataset_id = cur.lastrowid
@@ -151,16 +116,12 @@ class Dataset:
             name=dataset_name,
             imaging_status="in_progress",
             processing_status="not_started",
-            channels=channels,
-            z_layers_total=z_layers,
-            ribbons_total=ribbons_total,
-            z_layers_current=z_layers - 1,
-            ribbons_finished=0,
+            analysis_status="not_started",
+            # channels=channels,
+            imaris_file_path=None,
             imaging_no_progress_time=None,
             processing_no_progress_time=None,
-            keep_composites=0,
-            delete_405=0,
-            is_brain=is_brain_dataset,
+            # is_brain=is_brain_dataset,
             peace_json_created=None
         )
         return dataset
@@ -591,10 +552,10 @@ class Dataset:
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
         if os.path.exists(composites_dir):
             return composites_dir
-        if data_location == FASTSTORE_ACQUISITION_FOLDER:
+        if data_location == RSCM_FASTSTORE_ACQUISITION_FOLDER:
             data_location = HIVE_ACQUISITION_FOLDER
         else:
-            data_location = FASTSTORE_ACQUISITION_FOLDER
+            data_location = RSCM_FASTSTORE_ACQUISITION_FOLDER
         raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         return os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
 
@@ -610,10 +571,10 @@ class Dataset:
         if len(job_dirs):
             final_job_dir = job_dirs[-1]
         else: # TODO: rewrite this terrible piece
-            if data_location == FASTSTORE_ACQUISITION_FOLDER:
+            if data_location == RSCM_FASTSTORE_ACQUISITION_FOLDER:
                 data_location = HIVE_ACQUISITION_FOLDER
             else:
-                data_location = FASTSTORE_ACQUISITION_FOLDER
+                data_location = RSCM_FASTSTORE_ACQUISITION_FOLDER
             raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
             composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
             job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
@@ -642,10 +603,10 @@ class Dataset:
         ims_path = os.path.join(job_folder, self.imaris_file_name)
         if os.path.exists(ims_path):
             return ims_path
-        if data_location == FASTSTORE_ACQUISITION_FOLDER:  # TODO: rewrite this terrible piece
+        if data_location == RSCM_FASTSTORE_ACQUISITION_FOLDER:  # TODO: rewrite this terrible piece
             data_location = HIVE_ACQUISITION_FOLDER
         else:
-            data_location = FASTSTORE_ACQUISITION_FOLDER
+            data_location = RSCM_FASTSTORE_ACQUISITION_FOLDER
         composites_dir = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1')
         job_folder = os.path.join(composites_dir, f"job_{self.job_number}")
         if not os.path.exists(job_folder):
@@ -666,10 +627,10 @@ class Dataset:
         ims_part_path = os.path.join(job_folder, f"{self.imaris_file_name}.part")
         if os.path.exists(ims_part_path):
             return ims_part_path
-        if data_location == FASTSTORE_ACQUISITION_FOLDER:  # TODO: rewrite this terrible piece
+        if data_location == RSCM_FASTSTORE_ACQUISITION_FOLDER:  # TODO: rewrite this terrible piece
             data_location = HIVE_ACQUISITION_FOLDER
         else:
-            data_location = FASTSTORE_ACQUISITION_FOLDER
+            data_location = RSCM_FASTSTORE_ACQUISITION_FOLDER
         composites_dir = os.path.join(data_location, self.pi, self.cl_number, self.name, 'composites_RSCM_v0.1')
         job_folder = os.path.join(composites_dir, f"job_{self.job_number}")
         if not os.path.exists(job_folder):
@@ -721,8 +682,8 @@ class Dataset:
 
     def delete_channel_405(self):
         color = '405'
-        rootDir = os.path.join(FASTSTORE_ACQUISITION_FOLDER, self.pi, self.cl_number, self.name)  # build path like this for safety reasons
-        assert len(rootDir) > (len(FASTSTORE_ACQUISITION_FOLDER) + 1)  # for safety reasons
+        rootDir = os.path.join(RSCM_FASTSTORE_ACQUISITION_FOLDER, self.pi, self.cl_number, self.name)  # build path like this for safety reasons
+        assert len(rootDir) > (len(RSCM_FASTSTORE_ACQUISITION_FOLDER) + 1)  # for safety reasons
         log.info(f"Removing color 405 in folder {rootDir}")
         a = sorted(glob(os.path.join(rootDir, '**', color + '*')))
         log.info("Will remove folders:")
@@ -954,3 +915,92 @@ class Dataset:
 
 class Found(BaseException):
     pass
+
+
+class RSCMDataset(Dataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(**kwargs)
+        # self.db_id = kwargs.get('db_id')
+        # self.name = kwargs.get('name')
+        # self.path_on_fast_store = kwargs.get('path_on_fast_store')
+        # self.cl_number = kwargs.get('cl_number')
+        # self.pi = kwargs.get('pi')
+        # self.imaging_status = kwargs.get('imaging_status')
+        # self.processing_status = kwargs.get('processing_status')
+        # self.path_on_hive = kwargs.get('path_on_hive')
+        self.job_number = kwargs.get('job_number')
+        # self.imaris_file_path = kwargs.get('imaris_file_path')
+        # self.channels = kwargs.get('channels')
+        self.z_layers_total = kwargs.get('z_layers_total')
+        self.z_layers_current = kwargs.get('z_layers_current')
+        self.z_layers_checked = kwargs.get('z_layers_checked')
+        self.ribbons_total = kwargs.get('ribbons_total')
+        self.ribbons_finished = kwargs.get('ribbons_finished')
+        # self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
+        # self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
+        self.keep_composites = kwargs.get('keep_composites')
+        self.delete_405 = kwargs.get('delete_405')
+        # self.is_brain = kwargs.get('is_brain')
+        # self.peace_json_created = kwargs.get('peace_json_created')
+
+    @classmethod
+    def create(cls, file_path):
+        dataset = super().create(file_path)
+
+        with open(os.path.join(file_path, 'vs_series.dat'), 'r') as f:
+            data = f.read()
+
+        soup = BeautifulSoup(data, "xml")
+        z_layers = int(soup.find('stack_slice_count').text)
+        ribbons_in_z_layer = int(soup.find('grid_cols').text)
+
+        ribbons_finished = 0
+        subdirs = os.scandir(file_path.parent)
+        for subdir in subdirs:
+            if subdir.is_file() or 'layer' not in subdir.name:
+                continue
+            color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
+            channels = len(color_dirs)
+            for color_dir in color_dirs:
+                images_dir = os.path.join(color_dir, 'images')
+                ribbons = len(os.listdir(images_dir))
+                ribbons_finished += ribbons
+                if ribbons < ribbons_in_z_layer:
+                    break
+        current_z_layer = re.findall(r"\d+", subdir.name)[-1]
+        ribbons_total = z_layers * channels * ribbons_in_z_layer
+
+        # TODO update database record
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'UPDATE dataset SET z_layers_total = "{z_layers}", ribbons_total = "{ribbons_total}", z_layers_current = "{z_layers - 1}", ribbons_finished = 0 WHERE id={dataset.db_id}'
+        )
+        con.commit()
+        con.close()
+
+        # TODO update dataset class
+        dataset.z_layers_total = z_layers
+        dataset.ribbons_total = ribbons_total
+        dataset.z_layers_current = z_layers - 1
+        dataset.ribbons_finished = 0
+
+        dataset = cls(dataset)
+        return dataset
+
+
+class MesoSPIMDataset(Dataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(**kwargs)
+        self.tiles_total = kwargs.get('tiles_total')
+        self.z_layers = kwargs.get('z_layers')
+        self.resolution_xy = kwargs.get('resolution_xy')
+        self.resolution_z = kwargs.get('resolution_z')
+
+    @classmethod
+    def create(cls, file_path):
+        dataset = super().create(file_path)
+        print("Dataset", dataset)
+        # dataset = cls(dataset)
+        # print("MesoSPIMDataset", dataset)
+        return dataset

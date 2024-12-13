@@ -63,13 +63,13 @@ CREATE TABLE `warning` (
 """
 
 
-FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire"
+RSCM_FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/RSCM"
 DB_FILE = '/h20/CBI/Iana/projects/internal/RSCM_datasets'
 
 # Discover all vs_series.dat files in the acquisition directory
 print("Looking for vs_series files...")
 vs_series_files = []
-for root, dirs, files in os.walk(FASTSTORE_ACQUISITION_FOLDER):
+for root, dirs, files in os.walk(RSCM_FASTSTORE_ACQUISITION_FOLDER):
     for file in files:
         if file.endswith("vs_series.dat"):
             file_path = Path(os.path.join(root, file))

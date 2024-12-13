@@ -4,29 +4,16 @@ Database schema:
 Dataset:
     id
     name
-    path_on_fast_store
-    vs_series_file - OneToOne to VSSeriesFile
     cl_number - ForeignKey to CLNumber
     pi - ForeignKey to PI
     imaging_status (in_progress, paused, finished)
     processing_status (not_started, started, stitched, moved_to_hive, denoised, built_ims, finished)
+    path_on_fast_store
     path_on_hive
-    job_number
     imaris_file_path
     channels
-    z_layers_total
-    z_layers_current
-    ribbons_total
-    ribbons_finished
     imaging_no_progress_time
     processing_no_progress_time
-    z_layers_checked
-    keep_composites
-    delete_405
-
-VSSeriesFile:
-    id
-    path
 
 PI:
     id
@@ -48,7 +35,6 @@ Warning:
 Messages:
     1) imaging started
     2) imaging paused (crashed?)
-    2a) imaging resumed
     3) imaging finished
     4) processing started
     5) processing_paused (crashed?)
@@ -62,8 +48,6 @@ Other warnings:
 pip install python-dotenv
 
 ROADMAP:
-    - remove 405 color to trash folder
-    - delete raw composites once denoising finished (if no keep_composites is set)
     - track moving to hive
     - more informative processing statuses
     - extract tiff series after ims file is on hive
@@ -89,7 +73,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from imaris_ims_file_reader import ims
 
-from micro_status.dataset import Dataset
+from micro_status.dataset import Dataset, MesoSPIMDataset, RSCMDataset
 from micro_status.settings import *  # TODO replace this with normal import
 from micro_status.warning import Warning
 from micro_status.utils import can_be_moved
@@ -97,7 +81,6 @@ from micro_status.utils import can_be_moved
 
 console_handler = logging.StreamHandler()
 LOG_FILE_NAME_PATTERN = "/CBI_FastStore/Iana/bot_logs/{}_{}.txt"
-# DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 file_handler = logging.FileHandler(
     LOG_FILE_NAME_PATTERN.format(
         os.uname().nodename,
@@ -119,9 +102,9 @@ def check_if_new(file_path):
     con = sqlite3.connect(DB_LOCATION)
     con.row_factory = lambda cursor, row: row[0]
     cur = con.cursor()
-    vs_series_file_records = cur.execute('SELECT path FROM vsseriesfile').fetchall()
+    records = cur.execute('SELECT path_on_fast_store FROM dataset').fetchall()
     con.close()
-    return file_path not in vs_series_file_records
+    return file_path not in records
 
 
 def read_dataset_record(file_path):
@@ -134,7 +117,9 @@ def read_dataset_record(file_path):
         print("WARNING: broken/partial dataset", file_path)
         return
 
-    pi_id = record[5]
+    print("Record", record)
+
+    pi_id = record[4]
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
@@ -142,7 +127,7 @@ def read_dataset_record(file_path):
     if pi_name:
         pi_name = pi_name[0]
 
-    cl_number_id = record[4]
+    cl_number_id = record[3]
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
@@ -156,42 +141,43 @@ def read_dataset_record(file_path):
         path_on_fast_store = record[2],
         cl_number = cl_number,
         pi = pi_name,
-        imaging_status = record[6],
-        processing_status = record[7],
-        channels = record[11],
-        z_layers_total = record[12],
-        z_layers_current = record[13],
-        ribbons_total = record[14],
-        ribbons_finished = record[15],
-        imaging_no_progress_time = record[16],
-        processing_no_progress_time = record[17],
-        z_layers_checked = record[19],
-        keep_composites = record[20],
-        delete_405 = record[21],
-        is_brain=record[22],
-        peace_json_created=record[23]
+        imaging_status = record[5],
+        processing_status = record[6],
+
+        channels = record[10],
+        # z_layers_total = record[11],
+        # z_layers_current = record[12],
+        # ribbons_total = record[13],
+        # ribbons_finished = record[14],
+        imaging_no_progress_time = record[21],
+        processing_no_progress_time = record[22],
+        # z_layers_checked = record[19],
+        # keep_composites = record[20],
+        # delete_405 = record[21],
+        # is_brain=record[22],
+        # peace_json_created=record[23]
     )
     return dataset
 
 
-def check_imaging():
+def check_RSCM_imaging():
     # Discover all vs_series.dat files in the acquisition directory
     vs_series_files = []
-    for root, dirs, files in os.walk(FASTSTORE_ACQUISITION_FOLDER):
+    for root, dirs, files in os.walk(RSCM_FASTSTORE_ACQUISITION_FOLDER):
         for file in files:
             if file.endswith("vs_series.dat"):
                 file_path = Path(os.path.join(root, file))
-                if 'stack' in str(file_path.parent.name):
+                file_path = file_path.parent
+                if 'stack' in str(file_path.name):
                     vs_series_files.append(str(file_path))
     print("Unique datasets found: ", len(vs_series_files))
-    # TODO: files that were deleted, should also be removed from db
 
     for file_path in vs_series_files:
         print("Working on: ", file_path)
         is_new = check_if_new(file_path)
         if is_new:
             log.info("-----------------------New dataset--------------------------")
-            dataset = Dataset.create(file_path)
+            dataset = RSCMDataset.create(file_path)
             log.info(dataset.path_on_fast_store)
             if "demo" in dataset.name:
                 # demo dataset
@@ -249,7 +235,59 @@ def check_imaging():
                     # print(response)
 
 
-def check_processing():
+def check_mesoSPIM_imaging():
+    # Discover all metadata files in the acquisition directory
+    datasets = set()
+    for root, dirs, files in os.walk(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
+        for file in files:
+            if file.endswith(".btf_meta.txt"):
+                file_path = Path(os.path.join(root, file))
+                file_path = file_path.parent
+                datasets.add(str(file_path))
+    print("Unique datasets found: ", len(datasets))
+    print(*datasets, sep="\n")
+
+    for file_path in list(datasets):
+        print("Working on: ", file_path)
+        is_new = check_if_new(file_path)
+        if is_new:
+            log.info("-----------------------New mesoSPIM dataset--------------------------")
+            dataset = MesoSPIMDataset.create(file_path)
+            log.info(dataset.path_on_fast_store)
+            if "demo" in dataset.name:
+                # demo dataset
+                log.info(f"Ignoring demo dataset {dataset}")
+                print(f"Ignoring demo dataset {dataset}")
+                dataset.send_message('ignoring_demo_dataset')
+                dataset.mark_imaging_finished()
+                dataset.update_processing_status('finished')
+                continue
+            dataset.send_message('imaging_started')
+        dataset = read_dataset_record(file_path)
+        if dataset.imaging_status == 'in_progress':
+            settings_bin_file = sorted(glob(os.path.join(file_path, "*.bin")))
+            if len(settings_bin_file):
+                settings_bin_file = settings_bin_file[0]
+                import sys
+                sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
+                sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
+                import pickle
+                f = open(settings_bin_file, 'rb')
+                acquisition_list = pickle.load(f)
+                total_btf_files = len(acquisition_list)
+                if len(glob(os.path.join(file_path, "*.btf"))) == total_btf_files:
+                    files = sorted(glob(os.path.join(file_path, "*.btf")))
+                    tile_sizes = [os.path.getsize(x) for x in files]
+                    if len(set(tile_sizes)) == 1:
+                        dataset.mark_imaging_finished()
+                        dataset.send_message('imaging_finished')
+                        # dataset.start_processing()  # TODO this should be mesoSPIM specific
+        elif dataset.imaging_status == "finished" and dataset.processing_status == 'not_started':
+            # dataset.start_processing()  # TODO this should be mesoSPIM specific
+            pass
+
+
+def check_RSCM_processing():
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
@@ -629,9 +667,11 @@ def check_analysis():
 def scan():
     try:
         check_storage()
-        check_imaging()
-        check_processing()
-        # TODO db_cleanup()
+        check_RSCM_imaging()
+        check_mesoSPIM_imaging()
+        check_RSCM_processing()
+        check_mesoSPIM_processing()
+        # TODO db_backup()
         check_analysis()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
@@ -643,12 +683,15 @@ def scan():
 
 def scan_debug():
     check_storage()
-    check_imaging()
-    check_processing()
-    # TODO db_cleanup()
-    check_analysis()
+    # check_RSCM_imaging()
+    check_mesoSPIM_imaging()
+    # check_RSCM_processing()
+    # check_mesoSPIM_processing()
+    # TODO db_backup()
+    # check_analysis()
+    time.sleep(10)
 
 
 if __name__ == "__main__":
     while True:
-        scan()
+        scan_debug()
