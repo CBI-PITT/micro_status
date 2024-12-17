@@ -593,13 +593,14 @@ def check_mesoSPIM_processing():
         f'SELECT path_on_fast_store FROM dataset WHERE processing_status="in_progress"'
     ).fetchall()
     for dataset_path in records:
-        dataset = MesoSPIMDataset(dataset_path)
+        print('dataset_path', dataset_path[0])
+        dataset = MesoSPIMDataset(dataset_path[0])
         settings_bin_file = sorted(glob(os.path.join(dataset.path_on_fast_store, "*.bin")))
         if len(settings_bin_file):
             settings_bin_file = settings_bin_file[0]
             total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
             total_ims_files = len(glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*.ims')))
-            if total_ims_files == total_btf_files / dataset.channels:
+            if total_ims_files == int(total_btf_files / dataset.channels):
                 dataset.update_processing_status('finished')
                 dataset.send_message('processing_finished')
 

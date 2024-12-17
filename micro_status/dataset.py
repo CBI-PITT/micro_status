@@ -1048,7 +1048,7 @@ class MesoSPIMDataset(Dataset):
             con = sqlite3.connect(DB_LOCATION)
             cur = con.cursor()
             res = cur.execute(
-                f'UPDATE dataset SET channels = "{self.channels}" WHERE id={dataset.db_id}'
+                f'UPDATE dataset SET channels = "{self.channels}" WHERE id={self.db_id}'
             )
             con.commit()
             con.close()
