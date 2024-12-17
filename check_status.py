@@ -117,7 +117,7 @@ def read_dataset_record(file_path):
         print("WARNING: broken/partial dataset", file_path)
         return
 
-    print("Record", record)
+    # print("Record", record)
 
     pi_id = record[4]
     con = sqlite3.connect(DB_LOCATION)
@@ -236,6 +236,7 @@ def check_RSCM_imaging():
 
 
 def check_mesoSPIM_imaging():
+    print("Checking MesoSPIM imaging")
     # Discover all metadata files in the acquisition directory
     datasets = set()
     for root, dirs, files in os.walk(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
@@ -253,6 +254,8 @@ def check_mesoSPIM_imaging():
         if is_new:
             log.info("-----------------------New mesoSPIM dataset--------------------------")
             dataset = MesoSPIMDataset.create(file_path)
+            print("type", type(dataset))
+            print("dataset", dataset)
             log.info(dataset.path_on_fast_store)
             if "demo" in dataset.name:
                 # demo dataset
@@ -263,28 +266,37 @@ def check_mesoSPIM_imaging():
                 dataset.update_processing_status('finished')
                 continue
             dataset.send_message('imaging_started')
-        dataset = read_dataset_record(file_path)
+        dataset = MesoSPIMDataset(file_path)
+        # check whether imaging finished
         if dataset.imaging_status == 'in_progress':
             settings_bin_file = sorted(glob(os.path.join(file_path, "*.bin")))
             if len(settings_bin_file):
                 settings_bin_file = settings_bin_file[0]
-                import sys
-                sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
-                sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
-                import pickle
-                f = open(settings_bin_file, 'rb')
-                acquisition_list = pickle.load(f)
-                total_btf_files = len(acquisition_list)
+                total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
                 if len(glob(os.path.join(file_path, "*.btf"))) == total_btf_files:
                     files = sorted(glob(os.path.join(file_path, "*.btf")))
                     tile_sizes = [os.path.getsize(x) for x in files]
-                    if len(set(tile_sizes)) == 1:
+                    if len(set(tile_sizes)) == 1:  # imaging finished
                         dataset.mark_imaging_finished()
                         dataset.send_message('imaging_finished')
-                        # dataset.start_processing()  # TODO this should be mesoSPIM specific
+                        dataset.start_processing()
+                        dataset.update_processing_status('in_progress')
+                        dataset.send_message('processing_started')
         elif dataset.imaging_status == "finished" and dataset.processing_status == 'not_started':
-            # dataset.start_processing()  # TODO this should be mesoSPIM specific
-            pass
+            dataset.start_processing()
+            dataset.update_processing_status('in_progress')
+            dataset.send_message('processing_started')
+
+
+def get_total_MesoSPIM_tiles(settings_bin_file):
+    import sys
+    sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
+    sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
+    import pickle
+    f = open(settings_bin_file, 'rb')
+    acquisition_list = pickle.load(f)
+    total_btf_files = len(acquisition_list)
+    return total_btf_files
 
 
 def check_RSCM_processing():
@@ -573,6 +585,25 @@ def check_RSCM_processing():
             dataset.start_moving()
 
 
+def check_mesoSPIM_processing():
+    print("Checking MesoSPIM processing")
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="in_progress"'
+    ).fetchall()
+    for dataset_path in records:
+        dataset = MesoSPIMDataset(dataset_path)
+        settings_bin_file = sorted(glob(os.path.join(dataset.path_on_fast_store, "*.bin")))
+        if len(settings_bin_file):
+            settings_bin_file = settings_bin_file[0]
+            total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
+            total_ims_files = len(glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*.ims')))
+            if total_ims_files == total_btf_files / dataset.channels:
+                dataset.update_processing_status('finished')
+                dataset.send_message('processing_finished')
+
+
 def check_storage():
     def check(used_percent, storage_unit):
         """
@@ -686,10 +717,10 @@ def scan_debug():
     # check_RSCM_imaging()
     check_mesoSPIM_imaging()
     # check_RSCM_processing()
-    # check_mesoSPIM_processing()
+    check_mesoSPIM_processing()
     # TODO db_backup()
     # check_analysis()
-    time.sleep(10)
+    time.sleep(30)
 
 
 if __name__ == "__main__":

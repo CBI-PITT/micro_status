@@ -5,6 +5,7 @@ import re
 import requests
 import shutil
 import sqlite3
+import subprocess
 import time
 from datetime import datetime
 from glob import glob
@@ -21,29 +22,51 @@ log = logging.getLogger(__name__)
 
 
 class Dataset:
-    def __init__(self, **kwargs):
-        self.db_id = kwargs.get('db_id')
-        self.name = kwargs.get('name')
-        self.path_on_fast_store = kwargs.get('path_on_fast_store')
-        self.cl_number = kwargs.get('cl_number')
-        self.pi = kwargs.get('pi')
-        self.imaging_status = kwargs.get('imaging_status')
-        self.processing_status = kwargs.get('processing_status')
-        self.path_on_hive = kwargs.get('path_on_hive')
+    def __init__(self, path_on_fast_store, **kwargs):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        record = cur.execute(f'SELECT * FROM dataset WHERE path_on_fast_store="{str(path_on_fast_store)}"').fetchone()
+        con.close()
+
+        pi_id = record[4]
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
+        con.close()
+        if pi_name:
+            pi_name = pi_name[0]
+
+        cl_number_id = record[3]
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
+        con.close()
+        if cl_number:
+            cl_number = cl_number[0]
+
+        self.db_id = record[0]
+        self.name = record[1]
+        self.path_on_fast_store = path_on_fast_store
+        self.cl_number = cl_number
+        self.pi = pi_name
+
+        self.imaging_status = record[5]
+        self.processing_status = record[6]
+        # self.path_on_hive = kwargs.get('path_on_hive')
         # self.job_number = kwargs.get('job_number')
-        self.imaris_file_path = kwargs.get('imaris_file_path')
-        self.channels = kwargs.get('channels')
+        # self.imaris_file_path = kwargs.get('imaris_file_path')
+        self.channels = record[10]
         # self.z_layers_total = kwargs.get('z_layers_total')
         # self.z_layers_current = kwargs.get('z_layers_current')
         # self.z_layers_checked = kwargs.get('z_layers_checked')
         # self.ribbons_total = kwargs.get('ribbons_total')
         # self.ribbons_finished = kwargs.get('ribbons_finished')
-        self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
-        self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
+        self.imaging_no_progress_time = record[21]
+        self.processing_no_progress_time = record[22]
         # self.keep_composites = kwargs.get('keep_composites')
         # self.delete_405 = kwargs.get('delete_405')
-        self.is_brain = kwargs.get('is_brain', False)
-        self.peace_json_created = kwargs.get('peace_json_created', False)
+        # self.is_brain = kwargs.get('is_brain', False)
+        # self.peace_json_created = kwargs.get('peace_json_created', False)
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
@@ -124,7 +147,11 @@ class Dataset:
             # is_brain=is_brain_dataset,
             peace_json_created=None
         )
+        dataset._specific_setup()
         return dataset
+
+    def _specific_setup(self, **kwargs):
+        raise NotImplementedError("Subclasses must implement this method")
 
     def check_imaging_progress(self):
         error_flag = False
@@ -347,7 +374,7 @@ class Dataset:
 
     @classmethod
     def initialize_from_db(cls, record):
-        pi_id = record[5]
+        pi_id = record[4]
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
@@ -355,7 +382,7 @@ class Dataset:
         if pi_name:
             pi_name = pi_name[0]
 
-        cl_number_id = record[4]
+        cl_number_id = record[3]
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
@@ -943,11 +970,10 @@ class RSCMDataset(Dataset):
         # self.is_brain = kwargs.get('is_brain')
         # self.peace_json_created = kwargs.get('peace_json_created')
 
-    @classmethod
-    def create(cls, file_path):
-        dataset = super().create(file_path)
+    def _specific_setup(self, **kwargs):
+        print("In specific setup")
 
-        with open(os.path.join(file_path, 'vs_series.dat'), 'r') as f:
+        with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
             data = f.read()
 
         soup = BeautifulSoup(data, "xml")
@@ -955,6 +981,7 @@ class RSCMDataset(Dataset):
         ribbons_in_z_layer = int(soup.find('grid_cols').text)
 
         ribbons_finished = 0
+        file_path = Path(self.path_on_fast_store)
         subdirs = os.scandir(file_path.parent)
         for subdir in subdirs:
             if subdir.is_file() or 'layer' not in subdir.name:
@@ -970,7 +997,7 @@ class RSCMDataset(Dataset):
         current_z_layer = re.findall(r"\d+", subdir.name)[-1]
         ribbons_total = z_layers * channels * ribbons_in_z_layer
 
-        # TODO update database record
+        # update database record
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(
@@ -979,28 +1006,66 @@ class RSCMDataset(Dataset):
         con.commit()
         con.close()
 
-        # TODO update dataset class
-        dataset.z_layers_total = z_layers
-        dataset.ribbons_total = ribbons_total
-        dataset.z_layers_current = z_layers - 1
-        dataset.ribbons_finished = 0
-
-        dataset = cls(dataset)
-        return dataset
+        # update dataset instance
+        self.z_layers_total = z_layers
+        self.ribbons_total = ribbons_total
+        self.z_layers_current = z_layers - 1
+        self.ribbons_finished = 0
 
 
 class MesoSPIMDataset(Dataset):
     def __init__(self, *args, **kwargs):
-        super().__init__(**kwargs)
-        self.tiles_total = kwargs.get('tiles_total')
-        self.z_layers = kwargs.get('z_layers')
-        self.resolution_xy = kwargs.get('resolution_xy')
-        self.resolution_z = kwargs.get('resolution_z')
+        super().__init__(*args, **kwargs)
+        # self.tiles_total = kwargs.get('tiles_total')
+        # self.z_layers = kwargs.get('z_layers')
+        metadata_file = sorted(glob(os.path.join(self.path_on_fast_store, '*.btf_meta.txt')))[0]
+        f = open(metadata_file, 'r')
+        lines = f.readlines()
+        xy = [l for l in lines if "[Pixelsize in um]" in l][0]
+        xy_res = re.findall(r"\d+", xy)[0]
+        self.resolution_xy = int(xy_res)
+        z = [l for l in lines if "[z_stepsize]" in l][0]
+        z_res = re.findall(r"\d+\.\d+", z)[0]
+        self.resolution_z = int(float(z_res))
 
-    @classmethod
-    def create(cls, file_path):
-        dataset = super().create(file_path)
-        print("Dataset", dataset)
-        # dataset = cls(dataset)
-        # print("MesoSPIMDataset", dataset)
-        return dataset
+    def _specific_setup(self, **kwargs):
+        def get_total_MesoSPIM_colors(settings_bin_file):
+            import sys
+            sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
+            sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
+            import pickle
+            f = open(settings_bin_file, 'rb')
+            acquisition_list = pickle.load(f)
+            lasers = [x['laser'] for x in acquisition_list]
+            total_colors = len(set(lasers))
+            return total_colors
+
+        settings_bin_file = sorted(glob(os.path.join(self.path_on_fast_store, "*.bin")))
+        if len(settings_bin_file):
+            settings_bin_file = settings_bin_file[0]
+            self.channels = get_total_MesoSPIM_colors(settings_bin_file)
+            # update database record
+            con = sqlite3.connect(DB_LOCATION)
+            cur = con.cursor()
+            res = cur.execute(
+                f'UPDATE dataset SET channels = "{self.channels}" WHERE id={dataset.db_id}'
+            )
+            con.commit()
+            con.close()
+
+    def start_processing(self):
+        """
+        /CBI_FastStore/cbiPythonTools/mesospim_utils/mesospim_utils/rl.py convert-ims-dir-mesospim-tiles <path_on_fast_store> --res 5 1 1
+        """
+        cmd = [
+            '/CBI_FastStore/cbiPythonTools/mesospim_utils/mesospim_utils/rl.py',
+            'convert-ims-dir-mesospim-tiles',
+            self.path_on_fast_store,
+            '--res',
+            str(self.resolution_z),
+            str(self.resolution_xy),
+            str(self.resolution_xy)
+        ]
+        print("COMMAND TO CONVERT TO IMS", cmd)
+        subprocess.run(cmd)
+
