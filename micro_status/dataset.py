@@ -52,21 +52,31 @@ class Dataset:
 
         self.imaging_status = record[5]
         self.processing_status = record[6]
-        # self.path_on_hive = kwargs.get('path_on_hive')
-        # self.job_number = kwargs.get('job_number')
-        # self.imaris_file_path = kwargs.get('imaris_file_path')
+        self.path_on_hive = record[7]
+        self.job_number = record[8]
+        self.imaris_file_path = record[9]
         self.channels = record[10]
-        # self.z_layers_total = kwargs.get('z_layers_total')
-        # self.z_layers_current = kwargs.get('z_layers_current')
-        # self.z_layers_checked = kwargs.get('z_layers_checked')
-        # self.ribbons_total = kwargs.get('ribbons_total')
-        # self.ribbons_finished = kwargs.get('ribbons_finished')
+        self.z_layers_total = record[11]
+        self.z_layers_current = record[12]
+        self.z_layers_checked = record[24]
+        self.ribbons_total = record[13]
+        self.ribbons_finished = record[14]
+        self.tiles_total = record[15]
+        self.tiles_finished = record[16]
+        self.tiles_x = record[17]
+        self.tiles_y = record[18]
+        self.resolution_xy = record[19]
+        self.resolution_z = record[20]
         self.imaging_no_progress_time = record[21]
         self.processing_no_progress_time = record[22]
-        # self.keep_composites = kwargs.get('keep_composites')
-        # self.delete_405 = kwargs.get('delete_405')
-        # self.is_brain = kwargs.get('is_brain', False)
-        # self.peace_json_created = kwargs.get('peace_json_created', False)
+        self.processing_summray = record[23]
+        self.keep_composites = record[25]
+        self.delete_405 = record[26]
+        self.created = datetime.strptime(record[27], DATETIME_FORMAT)
+        self.modality = record[28]
+        self.is_brain = record[29]
+        self.peace_json_created = record[30]
+        self.imaging_summary = record[31]
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
@@ -154,68 +164,14 @@ class Dataset:
         raise NotImplementedError("Subclasses must implement this method")
 
     def check_imaging_progress(self):
-        error_flag = False
-        file_path = Path(self.path_on_fast_store)
-        ribbons_finished = 0  # TODO: optimize, start with current z layer, not mrom 0
-        subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
-        subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
-        if len(subdirs) > 1000:
-            len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
-            len3 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 3
-            subdirs_0 = filter(len4, subdirs)
-            subdirs_1 = filter(len3, subdirs)
-            subdirs = list(subdirs_0) + list(subdirs_1)
+        raise NotImplementedError("Subclasses must implement this method")
 
-        try:
-            for subdir in subdirs:
-                color_dirs = [x.path for x in os.scandir(subdir) if x.is_dir()]
-                for color_dir in color_dirs:
-                    images_dir = os.path.join(color_dir, 'images')
-                    ribbons = len(os.listdir(images_dir))
-                    ribbons_finished += ribbons
-                    if ribbons < self.ribbons_in_z_layer:
-                        raise Found
-        except Found:
-            pass
-        finally:
-            z_layers_current = re.findall(r"\d+", os.path.basename(subdir))[-1]
-        print("current imaging z layer :", z_layers_current)
-
-        finished = ribbons_finished == self.ribbons_total
-
+    def update_db_field(self, field_name, field_value):
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET ribbons_finished = {ribbons_finished} WHERE id={self.db_id}')
+        res = cur.execute(f'UPDATE dataset SET {field_name} = "{field_value}" WHERE id={self.db_id}')
         con.commit()
         con.close()
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET z_layers_current = {z_layers_current} WHERE id={self.db_id}')
-        con.commit()
-        con.close()
-
-        ribbons_finished_prev = self.ribbons_finished
-        self.ribbons_finished = ribbons_finished
-        self.z_layers_current = z_layers_current
-        has_progress = ribbons_finished > ribbons_finished_prev
-
-        if CHECKING_TIFFS_ENABLED and self.imaging_status == "in_progress":
-            print("self.z_layers_checked", self.z_layers_checked)
-            if finished:  # only check layer 0 (last layer)
-                z_start = 0
-                z_stop = -1
-            else:
-                z_start = int((self.z_layers_checked - 1) if self.z_layers_checked is not None else self.z_layers_total)
-                # z_start = int((self.z_layers_checked or self.z_layers_total) - 1)
-                z_stop = int(z_layers_current)
-
-            time.sleep(10)  # wait, in case if last image is still being saved
-            bad_layer = self.check_tiffs(z_start, z_stop)
-            if bad_layer is not None:
-                error_flag = True
-                self.z_layers_current = bad_layer
-
-        return finished, has_progress, error_flag
 
     def send_message(self, msg_type):
         log.info("---------------------Sending message------------------------")
@@ -944,128 +900,4 @@ class Found(BaseException):
     pass
 
 
-class RSCMDataset(Dataset):
-    def __init__(self, *args, **kwargs):
-        super().__init__(**kwargs)
-        # self.db_id = kwargs.get('db_id')
-        # self.name = kwargs.get('name')
-        # self.path_on_fast_store = kwargs.get('path_on_fast_store')
-        # self.cl_number = kwargs.get('cl_number')
-        # self.pi = kwargs.get('pi')
-        # self.imaging_status = kwargs.get('imaging_status')
-        # self.processing_status = kwargs.get('processing_status')
-        # self.path_on_hive = kwargs.get('path_on_hive')
-        self.job_number = kwargs.get('job_number')
-        # self.imaris_file_path = kwargs.get('imaris_file_path')
-        # self.channels = kwargs.get('channels')
-        self.z_layers_total = kwargs.get('z_layers_total')
-        self.z_layers_current = kwargs.get('z_layers_current')
-        self.z_layers_checked = kwargs.get('z_layers_checked')
-        self.ribbons_total = kwargs.get('ribbons_total')
-        self.ribbons_finished = kwargs.get('ribbons_finished')
-        # self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
-        # self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
-        self.keep_composites = kwargs.get('keep_composites')
-        self.delete_405 = kwargs.get('delete_405')
-        # self.is_brain = kwargs.get('is_brain')
-        # self.peace_json_created = kwargs.get('peace_json_created')
-
-    def _specific_setup(self, **kwargs):
-        print("In specific setup")
-
-        with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
-            data = f.read()
-
-        soup = BeautifulSoup(data, "xml")
-        z_layers = int(soup.find('stack_slice_count').text)
-        ribbons_in_z_layer = int(soup.find('grid_cols').text)
-
-        ribbons_finished = 0
-        file_path = Path(self.path_on_fast_store)
-        subdirs = os.scandir(file_path.parent)
-        for subdir in subdirs:
-            if subdir.is_file() or 'layer' not in subdir.name:
-                continue
-            color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
-            channels = len(color_dirs)
-            for color_dir in color_dirs:
-                images_dir = os.path.join(color_dir, 'images')
-                ribbons = len(os.listdir(images_dir))
-                ribbons_finished += ribbons
-                if ribbons < ribbons_in_z_layer:
-                    break
-        current_z_layer = re.findall(r"\d+", subdir.name)[-1]
-        ribbons_total = z_layers * channels * ribbons_in_z_layer
-
-        # update database record
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(
-            f'UPDATE dataset SET z_layers_total = "{z_layers}", ribbons_total = "{ribbons_total}", z_layers_current = "{z_layers - 1}", ribbons_finished = 0 WHERE id={dataset.db_id}'
-        )
-        con.commit()
-        con.close()
-
-        # update dataset instance
-        self.z_layers_total = z_layers
-        self.ribbons_total = ribbons_total
-        self.z_layers_current = z_layers - 1
-        self.ribbons_finished = 0
-
-
-class MesoSPIMDataset(Dataset):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # self.tiles_total = kwargs.get('tiles_total')
-        # self.z_layers = kwargs.get('z_layers')
-        metadata_file = sorted(glob(os.path.join(self.path_on_fast_store, '*.btf_meta.txt')))[0]
-        f = open(metadata_file, 'r')
-        lines = f.readlines()
-        xy = [l for l in lines if "[Pixelsize in um]" in l][0]
-        xy_res = re.findall(r"\d+", xy)[0]
-        self.resolution_xy = int(xy_res)
-        z = [l for l in lines if "[z_stepsize]" in l][0]
-        z_res = re.findall(r"\d+\.\d+", z)[0]
-        self.resolution_z = int(float(z_res))
-
-    def _specific_setup(self, **kwargs):
-        def get_total_MesoSPIM_colors(settings_bin_file):
-            import sys
-            sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
-            sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
-            import pickle
-            f = open(settings_bin_file, 'rb')
-            acquisition_list = pickle.load(f)
-            lasers = [x['laser'] for x in acquisition_list]
-            total_colors = len(set(lasers))
-            return total_colors
-
-        settings_bin_file = sorted(glob(os.path.join(self.path_on_fast_store, "*.bin")))
-        if len(settings_bin_file):
-            settings_bin_file = settings_bin_file[0]
-            self.channels = get_total_MesoSPIM_colors(settings_bin_file)
-            # update database record
-            con = sqlite3.connect(DB_LOCATION)
-            cur = con.cursor()
-            res = cur.execute(
-                f'UPDATE dataset SET channels = "{self.channels}" WHERE id={self.db_id}'
-            )
-            con.commit()
-            con.close()
-
-    def start_processing(self):
-        """
-        /CBI_FastStore/cbiPythonTools/mesospim_utils/mesospim_utils/rl.py convert-ims-dir-mesospim-tiles <path_on_fast_store> --res 5 1 1
-        """
-        cmd = [
-            '/CBI_FastStore/cbiPythonTools/mesospim_utils/mesospim_utils/rl.py',
-            'convert-ims-dir-mesospim-tiles',
-            self.path_on_fast_store,
-            '--res',
-            str(self.resolution_z),
-            str(self.resolution_xy),
-            str(self.resolution_xy)
-        ]
-        print("COMMAND TO CONVERT TO IMS", cmd)
-        subprocess.run(cmd)
 

@@ -73,7 +73,9 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from imaris_ims_file_reader import ims
 
-from micro_status.dataset import Dataset, MesoSPIMDataset, RSCMDataset
+from micro_status.dataset import Dataset
+from micro_status.mesospim_dataset import MesoSPIMDataset
+from micro_status.rscm_dataset import RSCMDataset
 from micro_status.settings import *  # TODO replace this with normal import
 from micro_status.warning import Warning
 from micro_status.utils import can_be_moved
@@ -107,78 +109,77 @@ def check_if_new(file_path):
     return file_path not in records
 
 
-def read_dataset_record(file_path):
-    con = sqlite3.connect(DB_LOCATION)
-    cur = con.cursor()
-    record = cur.execute(f'SELECT * FROM dataset WHERE path_on_fast_store="{str(file_path)}"').fetchone()
-    con.close()
-
-    if not record:
-        print("WARNING: broken/partial dataset", file_path)
-        return
-
-    # print("Record", record)
-
-    pi_id = record[4]
-    con = sqlite3.connect(DB_LOCATION)
-    cur = con.cursor()
-    pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
-    con.close()
-    if pi_name:
-        pi_name = pi_name[0]
-
-    cl_number_id = record[3]
-    con = sqlite3.connect(DB_LOCATION)
-    cur = con.cursor()
-    cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
-    con.close()
-    if cl_number:
-        cl_number = cl_number[0]
-
-    dataset = Dataset(
-        db_id = record[0],
-        name = record[1],
-        path_on_fast_store = record[2],
-        cl_number = cl_number,
-        pi = pi_name,
-        imaging_status = record[5],
-        processing_status = record[6],
-
-        channels = record[10],
-        # z_layers_total = record[11],
-        # z_layers_current = record[12],
-        # ribbons_total = record[13],
-        # ribbons_finished = record[14],
-        imaging_no_progress_time = record[21],
-        processing_no_progress_time = record[22],
-        # z_layers_checked = record[19],
-        # keep_composites = record[20],
-        # delete_405 = record[21],
-        # is_brain=record[22],
-        # peace_json_created=record[23]
-    )
-    return dataset
+# def read_dataset_record(file_path):
+#     con = sqlite3.connect(DB_LOCATION)
+#     cur = con.cursor()
+#     record = cur.execute(f'SELECT * FROM dataset WHERE path_on_fast_store="{str(file_path)}"').fetchone()
+#     con.close()
+#
+#     if not record:
+#         print("WARNING: broken/partial dataset", file_path)
+#         return
+#
+#     # print("Record", record)
+#
+#     pi_id = record[4]
+#     con = sqlite3.connect(DB_LOCATION)
+#     cur = con.cursor()
+#     pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
+#     con.close()
+#     if pi_name:
+#         pi_name = pi_name[0]
+#
+#     cl_number_id = record[3]
+#     con = sqlite3.connect(DB_LOCATION)
+#     cur = con.cursor()
+#     cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
+#     con.close()
+#     if cl_number:
+#         cl_number = cl_number[0]
+#
+#     dataset = Dataset(
+#         db_id = record[0],
+#         name = record[1],
+#         path_on_fast_store = record[2],
+#         cl_number = cl_number,
+#         pi = pi_name,
+#         imaging_status = record[5],
+#         processing_status = record[6],
+#
+#         channels = record[10],
+#         # z_layers_total = record[11],
+#         # z_layers_current = record[12],
+#         # ribbons_total = record[13],
+#         # ribbons_finished = record[14],
+#         imaging_no_progress_time = record[21],
+#         processing_no_progress_time = record[22],
+#         # z_layers_checked = record[19],
+#         # keep_composites = record[20],
+#         # delete_405 = record[21],
+#         # is_brain=record[22],
+#         # peace_json_created=record[23]
+#     )
+#     return dataset
 
 
 def check_RSCM_imaging():
     # Discover all vs_series.dat files in the acquisition directory
-    vs_series_files = []
+    datasets = []
     for root, dirs, files in os.walk(RSCM_FASTSTORE_ACQUISITION_FOLDER):
         for file in files:
             if file.endswith("vs_series.dat"):
                 file_path = Path(os.path.join(root, file))
                 file_path = file_path.parent
                 if 'stack' in str(file_path.name):
-                    vs_series_files.append(str(file_path))
-    print("Unique datasets found: ", len(vs_series_files))
+                    datasets.append(str(file_path))
+    print("Unique datasets found: ", len(datasets))
 
-    for file_path in vs_series_files:
+    for file_path in datasets:
         print("Working on: ", file_path)
         is_new = check_if_new(file_path)
         if is_new:
             log.info("-----------------------New dataset--------------------------")
             dataset = RSCMDataset.create(file_path)
-            log.info(dataset.path_on_fast_store)
             if "demo" in dataset.name:
                 # demo dataset
                 log.info(f"Ignoring demo dataset {dataset}")
@@ -189,11 +190,8 @@ def check_RSCM_imaging():
                 continue
             dataset.send_message('imaging_started')
         else:
-            dataset = read_dataset_record(file_path)
-            if not dataset or dataset.imaging_status == 'finished':
-                print("No dataset or Imaging status is 'finished'")
-                continue
-            elif dataset.imaging_status == 'in_progress':
+            dataset = RSCMDataset(file_path)
+            if dataset.imaging_status == 'in_progress':
                 print("Imaging status is 'in-progress'")
                 got_finished, has_progress, error_flag = dataset.check_imaging_progress()
                 if error_flag:
@@ -254,9 +252,6 @@ def check_mesoSPIM_imaging():
         if is_new:
             log.info("-----------------------New mesoSPIM dataset--------------------------")
             dataset = MesoSPIMDataset.create(file_path)
-            print("type", type(dataset))
-            print("dataset", dataset)
-            log.info(dataset.path_on_fast_store)
             if "demo" in dataset.name:
                 # demo dataset
                 log.info(f"Ignoring demo dataset {dataset}")
@@ -267,25 +262,15 @@ def check_mesoSPIM_imaging():
                 continue
             dataset.send_message('imaging_started')
         dataset = MesoSPIMDataset(file_path)
-        # check whether imaging finished
+        # check whether imaging finished or paused
         if dataset.imaging_status == 'in_progress':
-            settings_bin_file = sorted(glob(os.path.join(file_path, "*.bin")))
-            if len(settings_bin_file):
-                settings_bin_file = settings_bin_file[0]
-                total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
-                if len(glob(os.path.join(file_path, "*.btf"))) == total_btf_files:
-                    files = sorted(glob(os.path.join(file_path, "*.btf")))
-                    tile_sizes = [os.path.getsize(x) for x in files]
-                    if len(set(tile_sizes)) == 1:  # imaging finished
-                        dataset.mark_imaging_finished()
-                        dataset.send_message('imaging_finished')
-                        dataset.start_processing()
-                        dataset.update_processing_status('in_progress')
-                        dataset.send_message('processing_started')
+            dataset.check_imaging_progress()
         elif dataset.imaging_status == "finished" and dataset.processing_status == 'not_started':
             dataset.start_processing()
             dataset.update_processing_status('in_progress')
             dataset.send_message('processing_started')
+        elif dataset.imaging_status == "paused":
+            pass  # TODO check status again
 
 
 def get_total_MesoSPIM_tiles(settings_bin_file):
@@ -603,6 +588,7 @@ def check_mesoSPIM_processing():
             if total_ims_files == int(total_btf_files / dataset.channels):
                 dataset.update_processing_status('finished')
                 dataset.send_message('processing_finished')
+    # TODO message if processing paused
 
 
 def check_storage():
