@@ -344,7 +344,7 @@ def check_RSCM_processing():
     #     list_and_kill_jobs('lab', "DASK_WORKER")
     #     list_and_kill_jobs('lab', "RSCM_Listen")
     for record in records:
-        dataset = Dataset.initialize_from_db(record)
+        dataset = RSCMDataset.initialize_from_db(record)
         if dataset.check_being_stitched():
             dataset.update_processing_status('started')
             dataset.send_message('processing_started')
@@ -488,7 +488,7 @@ def check_RSCM_processing():
                 log.error(f"ERROR opening imaris file: {e}")
                 dataset.send_message("broken_ims_file")
                 dataset.update_processing_status('paused')
-                dataset.requeue_ims()
+                # dataset.requeue_ims()
 
                 # update ims_size=0 in processing_summary
                 processing_summary = dataset.get_processing_summary()
@@ -525,18 +525,18 @@ def check_RSCM_processing():
             # ims file is not being built
             print("Imaris file is not being built")
             # in_queue = os.path.exists(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'queueIMS', dataset.imsqueue_file_name))
-            if dataset.in_imaris_queue:
-                if dataset.processing_no_progress_time:
-                    dataset.mark_has_processing_progress()
-                # continue
-            else:
-                if not dataset.processing_no_progress_time:
-                    dataset.mark_no_processing_progress()
-                else:
-                    progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
-                    if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                        dataset.update_processing_status('paused')
-                        # dataset.send_message('ims_build_stuck')
+            # if dataset.in_imaris_queue:
+            #     if dataset.processing_no_progress_time:
+            #         dataset.mark_has_processing_progress()
+            #     # continue
+            # else:
+            #     if not dataset.processing_no_progress_time:
+            #         dataset.mark_no_processing_progress()
+            #     else:
+            #         progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
+            #         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
+            #             dataset.update_processing_status('paused')
+            #             # dataset.send_message('ims_build_stuck')
 
             # # check what other file is being processed, check its size
             # ims_converter_works = dataset.check_ims_converter_works()
@@ -593,7 +593,7 @@ def check_RSCM_processing():
             "started": dataset.check_stitching_progress,
             "stitched": dataset.check_denoising_progress,
             "denoised": dataset.check_ims_building_progress,
-            "built_ims": dataset.check_finalization_progress
+            # "built_ims": dataset.check_finalization_progress
         }
         has_progress = progress_methods_map[guessed_processing_status]()
         print("has progress", has_progress)
