@@ -77,6 +77,9 @@ class Dataset:
         self.is_brain = record[29]
         self.peace_json_created = record[30]
         self.imaging_summary = record[31]
+        self.moved = record[32]
+        self.moving = record[33]
+        self.paused = record[34]
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
@@ -262,14 +265,6 @@ class Dataset:
         self.imaging_status = "finished"
 
     @property
-    def ribbons_in_z_layer(self):
-        # TODO: fails here if file was removed
-        with open(self.path_on_fast_store, 'r') as f:
-            data = f.read()
-        soup = BeautifulSoup(data, "xml")
-        return int(soup.find('grid_cols').text)
-
-    @property
     def rscm_txt_file_name(self):
         return f"{str(self.db_id).zfill(5)}_{self.pi}_{self.cl_number}_{self.name}.txt"
 
@@ -284,6 +279,7 @@ class Dataset:
         """
         dat_file_path = Path(self.path_on_fast_store)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
+        # txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', self.rscm_txt_file_name)
         contents = f'rootDir="{str(dat_file_path.parent)}"\nkeepComposites=True\nmoveToHive=False'
         with open(txt_file_path, "w") as f:
             f.write(contents)
@@ -347,28 +343,41 @@ class Dataset:
         if cl_number:
             cl_number = cl_number[0]
         obj = cls(
-            db_id = record[0],
-            name = record[1],
-            path_on_fast_store = record[2],
-            cl_number = cl_number,
-            pi = pi_name,
-            imaging_status = record[6],
-            processing_status = record[7],
-            path_on_hive = record[8],
-            job_number = record[9],
-            imaris_file_path = record[10],
-            channels = record[11],
-            z_layers_total = record[12],
-            z_layers_current = record[13],
-            ribbons_total = record[14],
-            ribbons_finished = record[15],
-            imaging_no_progress_time = record[16],
-            processing_no_progress_time = record[17],
-            z_layers_checked = record[19],
-            keep_composites = record[20],
-            delete_405 = record[21],
-            is_brain=record[22],
-            peace_json_created=record[23]
+            db_id=record[0],
+            name=record[1],
+            path_on_fast_store=record[2],
+            cl_number=cl_number,
+            pi=pi_name,
+            imaging_status=record[5],
+            processing_status=record[6],
+            path_on_hive=record[7],
+            job_number=record[8],
+            imaris_file_path=record[9],
+            channels=record[10],
+            z_layers_total=record[11],
+            z_layers_current=record[12],
+            ribbons_total=record[13],
+            ribbons_finished=record[14],
+            tiles_total=record[15],
+            tiles_finished=record[16],
+            tiles_x=record[17],
+            tiles_y=record[18],
+            resolution_xy=record[19],
+            resolution_z=record[20],
+            imaging_no_progress_time=record[21],
+            processing_no_progress_time=record[22],
+            processing_summray=record[23],
+            z_layers_checked=record[24],
+            keep_composites=record[25],
+            delete_405=record[26],
+            created=datetime.strptime(record[27], DATETIME_FORMAT),
+            modality=record[28],
+            is_brain=record[29],
+            peace_json_created=record[30],
+            imaging_summary=record[31],
+            moved=record[32],
+            moving=record[33],
+            paused=record[34]
         )
         return obj
 
@@ -720,14 +729,14 @@ class Dataset:
                 self.update_processing_summary({'building_ims': value_from_db})
             else:
                 self.update_processing_summary({'building_ims': {'ims_size': current_ims_size}})
-        else:
-            has_progress = self.in_imaris_queue and self.check_ims_converter_works()
-            print("has_progress", has_progress)
+        # else:
+        #     has_progress = self.in_imaris_queue and self.check_ims_converter_works()
+        #     print("has_progress", has_progress)
         return has_progress
 
-    @property
-    def imsqueue_file_name(self):
-        return f"job_{self.job_number}.txt.imsqueue"
+    # @property
+    # def imsqueue_file_name(self):
+    #     return f"job_{self.job_number}.txt.imsqueue"
 
     def check_ims_converter_works(self):
         currently_building = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', '*.imsqueue'))
@@ -813,13 +822,17 @@ class Dataset:
         file name: {dataset_id}_{pi_name}_{cl_number}_{dataset_name}_move.txt
         this way the earlier datasets go in first
         """
+        print("Starting to move")
         dat_file_path = Path(self.path_on_fast_store)
-        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_move_txt_file_name)
-        contents = f'rootDir="{str(dat_file_path.parent)}"\nIMS=False\ndenoise=False\nmoveOnly=True'
+        # txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_move_txt_file_name)
+        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', self.rscm_move_txt_file_name)
+        contents = f'rootDir="{str(dat_file_path)}"\nIMS=False\ndenoise=False\nmoveOnly=True'
         with open(txt_file_path, "w") as f:
             f.write(contents)
         log.info("-----------------------Queue moving to Hive. Text file : ---------------------")
         log.info(contents)
+        self.moving = True
+        self.update_db_field('moving', 1)
 
     @property
     def in_imaris_queue(self):
@@ -894,6 +907,18 @@ class Dataset:
         con.commit()
         con.close()
         self.send_message('peace_json_created')
+
+    def check_if_moved(self):
+        moved = os.path.exists(os.path.join(RSCM_FOLDER_STITCHING, 'complete', self.rscm_move_txt_file_name))
+        if moved:
+            self.update_db_field('moved', 1)
+            self.moved = True
+            self.update_db_field('moving', 0)
+            self.moving = False
+            path_on_hive = self.path_on_fast_store.replace(FASTSTORE_ACQUISITION_FOLDER, HIVE_ACQUISITION_FOLDER)
+            if os.path.exists(path_on_hive):
+                self.update_db_field('path_on_hive', path_on_hive)
+                self.path_on_hive = path_on_hive
 
 
 class Found(BaseException):

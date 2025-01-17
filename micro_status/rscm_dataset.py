@@ -6,26 +6,17 @@ import time
 from glob import glob
 from pathlib import Path
 
+from bs4 import BeautifulSoup
+
 from .dataset import Dataset
+from .settings import *
 
 log = logging.getLogger(__name__)
 
 
 class RSCMDataset(Dataset):
     def __init__(self, *args, **kwargs):
-        super().__init__(**kwargs)
-        self.job_number = kwargs.get('job_number')
-        self.z_layers_total = kwargs.get('z_layers_total')
-        self.z_layers_current = kwargs.get('z_layers_current')
-        self.z_layers_checked = kwargs.get('z_layers_checked')
-        self.ribbons_total = kwargs.get('ribbons_total')
-        self.ribbons_finished = kwargs.get('ribbons_finished')
-        # self.imaging_no_progress_time = kwargs.get('imaging_no_progress_time')
-        # self.processing_no_progress_time = kwargs.get('processing_no_progress_time')
-        self.keep_composites = kwargs.get('keep_composites')
-        self.delete_405 = kwargs.get('delete_405')
-        # self.is_brain = kwargs.get('is_brain')
-        # self.peace_json_created = kwargs.get('peace_json_created')
+        super().__init__(*args, **kwargs)
 
     def _specific_setup(self, **kwargs):
         print("In specific setup")
@@ -39,7 +30,7 @@ class RSCMDataset(Dataset):
 
         ribbons_finished = 0
         file_path = Path(self.path_on_fast_store)
-        subdirs = os.scandir(file_path.parent)
+        subdirs = os.scandir(file_path)
         for subdir in subdirs:
             if subdir.is_file() or 'layer' not in subdir.name:
                 continue
@@ -58,7 +49,7 @@ class RSCMDataset(Dataset):
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(
-            f'UPDATE dataset SET z_layers_total = "{z_layers}", ribbons_total = "{ribbons_total}", z_layers_current = "{z_layers - 1}", ribbons_finished = 0, modality = "rscm" WHERE id={dataset.db_id}'
+            f'UPDATE dataset SET z_layers_total = "{z_layers}", ribbons_total = "{ribbons_total}", z_layers_current = "{z_layers - 1}", ribbons_finished = 0, modality = "rscm" WHERE id={self.db_id}'
         )
         con.commit()
         con.close()
@@ -73,7 +64,7 @@ class RSCMDataset(Dataset):
         error_flag = False
         file_path = Path(self.path_on_fast_store)
         ribbons_finished = 0  # TODO: optimize, start with current z layer, not mrom 0
-        subdirs = sorted(glob(os.path.join(file_path.parent, '*')), reverse=True)
+        subdirs = sorted(glob(os.path.join(file_path, '*')), reverse=True)
         subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
         if len(subdirs) > 1000:
             len4 = lambda x: len(re.findall(r"\d+", os.path.basename(x))[-1]) == 4
@@ -132,3 +123,27 @@ class RSCMDataset(Dataset):
                 self.z_layers_current = bad_layer
 
         return finished, has_progress, error_flag
+
+    def build_imaris_file(self):
+        import subprocess
+        print(" !!!!!!!!!!!!!!!!!!!! Starting imaris build command !!!!!!!!!!!!!!!!!!!")
+        cmd = [
+            '/h20/home/lab/miniconda3/envs/make_ims/bin/python',
+            '/h20/home/lab/scripts/makeIMS_slurm_wine.py',
+            self.job_dir,
+            'true'
+        ]
+        print(cmd)
+        subprocess.run(cmd)
+
+    @property
+    def ribbons_in_z_layer(self):
+        # TODO: fails here if file was removed
+        with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
+            data = f.read()
+        soup = BeautifulSoup(data, "xml")
+        return int(soup.find('grid_cols').text)
+
+
+class Found(BaseException):
+    pass
