@@ -194,7 +194,8 @@ class Dataset:
             'built_ims': "Imaris file built for {} {} {}. Check it out at {}",
             'ignoring_demo_dataset': "Ignoring demo dataset {} {} {}",
             'requeue_ims': "Requeuing ims build task for {} {} {}",
-            'peace_json_created': "Created analysis task for brain dataset {} {} {}"
+            'peace_json_created': "Created analysis task for brain dataset {} {} {}",
+            'moved': "Dataset {} {} {} has been moved to h20"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
@@ -538,6 +539,7 @@ class Dataset:
             if os.path.exists(path_on_hive):
                 self.update_db_field('path_on_hive', path_on_hive)
                 self.path_on_hive = path_on_hive
+                self.send_message('moved')
 
 
 class Found(BaseException):

@@ -48,10 +48,11 @@ Other warnings:
 pip install python-dotenv
 
 ROADMAP:
+    - mark MesoSPIM processing finished when it's stitched
     - track moving to hive
     - more informative processing statuses
-    - extract tiff series after ims file is on hive
-    - do alignment, spot counting etc?
+    - respond to messages in threads
+
 """
 
 import json
@@ -265,11 +266,12 @@ def check_mesoSPIM_imaging():
         # check whether imaging finished or paused
         if dataset.imaging_status == 'in_progress':
             dataset.check_imaging_progress()
-        elif dataset.imaging_status == "finished" and not dataset.moved and dataset.moving:
-            dataset.check_if_moved()
-        elif dataset.imaging_status == "finished" and not dataset.moved and not dataset.moving:
-            dataset.start_moving()
-        elif dataset.imaging_status == "finished" and dataset.moved and dataset.path_on_hive is not None and dataset.processing_status == 'not_started':
+        # elif dataset.imaging_status == "finished" and not dataset.moved and dataset.moving:
+        #     dataset.check_if_moved()
+        # elif dataset.imaging_status == "finished" and not dataset.moved and not dataset.moving:
+        #     dataset.start_moving()  # TODO
+        # elif dataset.imaging_status == "finished" and dataset.moved and dataset.path_on_hive is not None and dataset.processing_status == 'not_started':
+        elif dataset.imaging_status == "finished" and dataset.processing_status == "not_started":
             dataset.start_processing()
             dataset.update_processing_status('in_progress')
             dataset.send_message('processing_started')
@@ -498,11 +500,11 @@ def check_RSCM_processing():
                     dataset.update_processing_summary({'building_ims': value_from_db})
                 continue
             else:
-                dataset.update_processing_status('built_ims')
+                dataset.update_processing_status('finished')
                 dataset.send_message('built_ims')
                 if not dataset.keep_composites:
                     dataset.clean_up_denoised_composites()
-                # dataset.start_moving()
+                dataset.start_moving()
         elif os.path.exists(dataset.full_path_to_ims_part_file):
             # Building of ims file in-progress
             print("Building Imaris file in-progress")
@@ -555,10 +557,10 @@ def check_RSCM_processing():
 
     # Eventually datasets should be on hive
     records = cur.execute(
-        'SELECT * FROM dataset WHERE processing_status="built_ims"'
+        'SELECT * FROM dataset WHERE modality = "rscm" AND processing_status="finished"'
     ).fetchall()
     for record in records:
-        dataset = Dataset.initialize_from_db(record)
+        dataset = RSCMDataset.initialize_from_db(record)
         path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
         if os.path.exists(os.path.join(path_on_hive, 'vs_series.dat')):
             dataset.update_path_on_hive(path_on_hive)
@@ -574,7 +576,7 @@ def check_RSCM_processing():
             else:
                 # update db, send msg
                 dataset.update_imaris_file_path(final_ims_file_path)
-                dataset.update_processing_status('finished')
+                # dataset.update_processing_status('finished')
                 dataset.send_message("processing_finished")
 
     # ==================== Handle 'paused' processing status ==================
@@ -603,42 +605,33 @@ def check_RSCM_processing():
         print("guessed_processing_status", guessed_processing_status)
         print("dataset.job_dir", dataset.job_dir)
         print("os.path.exists(dataset.job_dir)", os.path.exists(dataset.job_dir))
-        if guessed_processing_status == "denoised" and dataset.job_dir.startswith('/CBI_FastStore') and os.path.exists(dataset.job_dir):
+        if guessed_processing_status == "finished" and dataset.job_dir.startswith('/CBI_FastStore') and os.path.exists(dataset.job_dir):
             dataset.start_moving()
 
 
-def check_mesoSPIM_moving():
+def check_moving():
     print("Checking MesoSPIM moving")
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
-        f'SELECT path_on_fast_store FROM dataset WHERE imaging_status="finished"'
+        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="finished" AND moved=0'
     ).fetchall()
     for dataset_path in records:
         print('dataset_path', dataset_path[0])
-        dataset = MesoSPIMDataset(dataset_path[0])
+        if dataset_path[0].startswith(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
+            dataset = MesoSPIMDataset(dataset_path[0])
+        elif dataset_path[0].startswith(RSCM_FASTSTORE_ACQUISITION_FOLDER):
+            dataset = RSCMDataset(dataset_path[0])
+        else:
+            continue
         if dataset.moving and not dataset.moved:
             dataset.check_if_moved()
         elif not dataset.moved and not dataset.moving:
             dataset.start_moving()
-        elif dataset.moved and dataset.path_on_hive is not None and dataset.processing_status == 'not_started':
-            dataset.start_processing()
-            dataset.update_processing_status('in_progress')
-            dataset.send_message('processing_started')
-    print("Can data be moved now? ", can_be_moved())
-    # if can_be_moved():
-    #     # move all files from tempQueue to QueueStitch
-    #     files_in_temp_queue = sorted(glob(os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', '*move.txt')))
-    #     for file in files_in_temp_queue:
-    #         path_in_queue = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', os.path.basename(file))
-    #         print("moving", file, "to", path_in_queue)
-    #         shutil.move(file, path_in_queue)
-    # else:
-    #     # move all files from QueueStitch to tempQueue
-    #     files_in_queue = sorted(glob(os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', '*move.txt')))
-    #     for file in files_in_queue:
-    #         path_in_temp_queue = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', os.path.basename(file))
-    #         shutil.move(file, path_in_temp_queue)
+        # elif dataset.moved and dataset.path_on_hive is not None and dataset.processing_status == 'not_started':
+        #     dataset.start_processing()
+        #     dataset.update_processing_status('in_progress')
+        #     dataset.send_message('processing_started')
 
 
 def check_mesoSPIM_processing():
@@ -646,7 +639,7 @@ def check_mesoSPIM_processing():
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
-        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="in_progress"'
+        f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="in_progress"'
     ).fetchall()
     for dataset_path in records:
         print('dataset_path', dataset_path[0])
@@ -655,10 +648,18 @@ def check_mesoSPIM_processing():
         if len(settings_bin_file):
             settings_bin_file = settings_bin_file[0]
             total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
-            total_ims_files = len(glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*.ims')))
+            ims_files = sorted(glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*.ims')))
+            total_ims_files = len(ims_files)
             if total_ims_files == int(total_btf_files / dataset.channels):
-                dataset.update_processing_status('finished')
-                dataset.send_message('processing_finished')
+                all_ims_files_open = dataset.check_tile_ims_files()
+                if all_ims_files_open:
+                    dataset.update_processing_status('finished')
+                    dataset.send_message('processing_finished')
+                    dataset.start_moving()
+                else:
+                    print("Found broken ims files")
+            else:
+                print("processing still in progress")
     # TODO message if processing paused
 
 
@@ -736,6 +737,23 @@ def check_storage():
     check(faststore_used_percent, "faststore")
 
 
+def move_files():
+    print("Can data be moved now? ", can_be_moved())
+    if can_be_moved():
+        # move all files from tempQueue to QueueStitch
+        files_in_temp_queue = sorted(glob(os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', '*move.txt')))
+        for file in files_in_temp_queue:
+            path_in_queue = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', os.path.basename(file))
+            print("moving", file, "to", path_in_queue)
+            shutil.move(file, path_in_queue)
+    else:
+        # move all files from QueueStitch to tempQueue
+        files_in_queue = sorted(glob(os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', '*move.txt')))
+        for file in files_in_queue:
+            path_in_temp_queue = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', os.path.basename(file))
+            shutil.move(file, path_in_temp_queue)
+
+
 def check_analysis():
     """
     If the finished dataset is a brain, send it for analysis by PEACE pipeline
@@ -759,30 +777,35 @@ def scan():
         check_RSCM_imaging()
         check_mesoSPIM_imaging()
         check_RSCM_processing()
-        # check_mesoSPIM_processing()
+        check_mesoSPIM_processing()
+        move_files()
+        check_moving()
         # TODO db_backup()
         # check_analysis()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
         print(traceback.format_exc())
 
-    print("========================== Waiting 60 seconds ========================")
-    time.sleep(60)
+    print("========================== Waiting 61 seconds ========================")
+    time.sleep(61)
 
 
 def scan_debug():
     check_storage()
     check_RSCM_imaging()
     check_mesoSPIM_imaging()
-    # check_mesoSPIM_moving()
     check_RSCM_processing()
-    # check_mesoSPIM_processing()
+    check_mesoSPIM_processing()
+    move_files()
+    check_moving()
     # TODO db_backup()
     # check_analysis()
-    time.sleep(60)
+    time.sleep(10)
+
 
 if __name__ == "__main__":
     while True:
         scan()
         # scan_debug()
-        time.sleep(60)
+        print("========================== Waiting 59 seconds ========================")
+        time.sleep(59)

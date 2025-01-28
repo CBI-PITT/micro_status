@@ -29,6 +29,7 @@ STORAGE_THRESHOLD_0 = 85
 STORAGE_THRESHOLD_1 = 90
 CHECKING_TIFFS_ENABLED = True
 MESSAGES_ENABLED = True
+# MESSAGES_ENABLED = False
 WHERE_PROCESSING_HAPPENS = {
     'stitch': 'faststore',
     'build_composites': 'faststore',

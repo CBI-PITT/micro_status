@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import time
 from glob import glob
@@ -130,8 +131,8 @@ class RSCMDataset(Dataset):
         this way the earlier datasets go in first
         """
         file_path = Path(self.path_on_fast_store)
-        # txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
-        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', self.rscm_txt_file_name)
+        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
+        # txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', self.rscm_txt_file_name)
         contents = f'rootDir="{str(file_path)}"\nkeepComposites=True\nmoveToHive=False'
         with open(txt_file_path, "w") as f:
             f.write(contents)
@@ -524,7 +525,7 @@ class RSCMDataset(Dataset):
         # else:
         #     return status
         if self.check_imaris_file_built():
-            status = "built_ims"
+            status = "finished"
         return status
 
 

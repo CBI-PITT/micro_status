@@ -137,3 +137,17 @@ class MesoSPIMDataset(Dataset):
         ]
         print("COMMAND TO CONVERT TO IMS", cmd)
         subprocess.run(cmd)
+
+    def check_tile_ims_files(self):
+        from imaris_ims_file_reader import ims
+        all_good = True
+        ims_files = sorted(glob(os.path.join(self.path_on_fast_store, 'ims_files', '*.ims')))
+        for ims_file in ims_files:
+            try:
+                # try to open imaris file
+                ims_file_obj = ims(ims_file)
+            except Exception as e:
+                log.error(f"ERROR opening imaris file: {e}")
+                self.send_message("broken_ims_file")
+                all_good = False
+        return all_good

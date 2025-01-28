@@ -7,14 +7,26 @@ def can_be_moved():
     # time restrictions
     if not RESTRICT_MOVING_TIME:
         return True
-    r = requests.get("http://worldtimeapi.org/api/timezone/America/New_York")
-    r_json = r.json()
-    local_time_str = r_json['datetime']
-    local_time = datetime.strptime(local_time_str, '%Y-%m-%dT%H:%M:%S.%f%z')
-    week_day = r_json['day_of_week']
+    # r = requests.get("http://worldtimeapi.org/api/timezone/America/New_York")
+    # r_json = r.json()
+    # local_time_str = r_json['datetime']
+    # week_day = r_json['day_of_week']
+    # print("local_time_str", local_time_str)
+
+    week_day = datetime.today().weekday()
+    print("week_day", week_day)
     if week_day == 6 or week_day == 7:
         return True
-    if local_time.hour >= MOVE_TIMES['start'] and local_time.hour <= MOVE_TIMES['stop']:
+
+    import pytz
+    # Get the current time in UTC
+    current_time_utc = datetime.now(pytz.utc)
+    # Get the local timezone
+    local_timezone = pytz.timezone('America/New_York')
+    # Convert UTC time to local time
+    local_time = current_time_utc.astimezone(local_timezone)
+    print("local_time.hour", local_time.hour)
+    if local_time.hour >= MOVE_TIMES['start'] or local_time.hour <= MOVE_TIMES['stop']:
         return True
     return False
 
