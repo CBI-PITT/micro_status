@@ -488,7 +488,7 @@ def check_RSCM_processing():
                 ims_file = ims(dataset.full_path_to_imaris_file)
             except Exception as e:
                 log.error(f"ERROR opening imaris file: {e}")
-                dataset.send_message("broken_ims_file")
+                # dataset.send_message("broken_ims_file")
                 dataset.update_processing_status('paused')
                 # dataset.requeue_ims()
 
@@ -619,7 +619,11 @@ def check_moving():
     for dataset_path in records:
         print('dataset_path', dataset_path[0])
         if dataset_path[0].startswith(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
-            dataset = MesoSPIMDataset(dataset_path[0])
+            try:
+                dataset = MesoSPIMDataset(dataset_path[0])
+            except:
+                print("WARNING: Invalid dataset at", dataset_path[0])
+                continue
         elif dataset_path[0].startswith(RSCM_FASTSTORE_ACQUISITION_FOLDER):
             dataset = RSCMDataset(dataset_path[0])
         else:
@@ -643,19 +647,30 @@ def check_mesoSPIM_processing():
     ).fetchall()
     for dataset_path in records:
         print('dataset_path', dataset_path[0])
-        dataset = MesoSPIMDataset(dataset_path[0])
+        try:
+            dataset = MesoSPIMDataset(dataset_path[0])
+        except:
+            print("WARNING: Invalid dataset at", dataset_path[0])
+            continue
         settings_bin_file = sorted(glob(os.path.join(dataset.path_on_fast_store, "*.bin")))
         if len(settings_bin_file):
             settings_bin_file = settings_bin_file[0]
             total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
-            ims_files = sorted(glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*.ims')))
+            ims_files = sorted(glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*Tile*_Ch*_Sh*.ims')))
             total_ims_files = len(ims_files)
-            if total_ims_files == int(total_btf_files / dataset.channels):
+            channels = dataset.get_total_MesoSPIM_colors_from_file_list()
+            if total_ims_files == int(total_btf_files / channels):
                 all_ims_files_open = dataset.check_tile_ims_files()
                 if all_ims_files_open:
-                    dataset.update_processing_status('finished')
-                    dataset.send_message('processing_finished')
-                    dataset.start_moving()
+                    montage_files = glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*ontage.ims'))
+                    if len(montage_files) > 0:
+                        try:
+                            ims_file = ims(montage_files[0])
+                            dataset.update_processing_status('finished')
+                            dataset.send_message('processing_finished')
+                            dataset.start_moving()
+                        except:
+                            print("Still stitching")
                 else:
                     print("Found broken ims files")
             else:

@@ -39,16 +39,24 @@ class MesoSPIMDataset(Dataset):
         bin_files = sorted(glob(os.path.join(self.path, "*.bin")))
         if len(bin_files):
             self.settings_bin_file = bin_files[0]
-            self.channels = self.get_total_MesoSPIM_colors()
+            self.channels = self.get_total_MesoSPIM_colors_from_bin_file()
             self.tiles_total = self.get_total_MesoSPIM_tiles()
 
     def _specific_setup(self, **kwargs):
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(
+            f'UPDATE dataset SET modality = "mesospim" WHERE id={self.db_id}'
+        )
+        con.commit()
+        con.close()
+
         if self.settings_bin_file:
             # update database record
             con = sqlite3.connect(DB_LOCATION)
             cur = con.cursor()
             res = cur.execute(
-                f'UPDATE dataset SET channels = "{self.channels}", modality = "mesospim" WHERE id={self.db_id}'
+                f'UPDATE dataset SET channels = "{self.channels}", tiles_total = "{self.tiles_total}" WHERE id={self.db_id}'
             )
             con.commit()
             con.close()
@@ -111,7 +119,7 @@ class MesoSPIMDataset(Dataset):
             total_btf_files = len(acquisition_list)
             return total_btf_files
 
-    def get_total_MesoSPIM_colors(self):
+    def get_total_MesoSPIM_colors_from_bin_file(self):
         # print("Counting color channels")
         if self.settings_bin_file:
             sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
@@ -121,6 +129,14 @@ class MesoSPIMDataset(Dataset):
             lasers = [x['laser'] for x in acquisition_list]
             total_colors = len(set(lasers))
             return total_colors
+
+    def get_total_MesoSPIM_colors_from_file_list(self):
+        btf_files = [x for x in os.listdir(self.path_on_fast_store) if x.endswith(".btf")]
+        import re
+        pattern = r'_Ch([0-9]+[a-zA-Z]?)_'
+        channel_matches = [re.findall(pattern, x)[0] for x in btf_files]
+        channels = len(set(channel_matches))
+        return channels
 
     def start_processing(self):
         """
@@ -141,7 +157,7 @@ class MesoSPIMDataset(Dataset):
     def check_tile_ims_files(self):
         from imaris_ims_file_reader import ims
         all_good = True
-        ims_files = sorted(glob(os.path.join(self.path_on_fast_store, 'ims_files', '*.ims')))
+        ims_files = sorted(glob(os.path.join(self.path_on_fast_store, 'ims_files', '*Tile*_Ch*_Sh*.ims')))
         for ims_file in ims_files:
             try:
                 # try to open imaris file

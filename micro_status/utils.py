@@ -15,7 +15,7 @@ def can_be_moved():
 
     week_day = datetime.today().weekday()
     print("week_day", week_day)
-    if week_day == 6 or week_day == 7:
+    if week_day == 5 or week_day == 6:
         return True
 
     import pytz
