@@ -142,14 +142,20 @@ class MesoSPIMDataset(Dataset):
         """
         /CBI_FastStore/cbiPythonTools/mesospim_utils/mesospim_utils/rl.py convert-ims-dir-mesospim-tiles <path_on_fast_store> --res 5 1 1
         """
+        # cmd = [
+        #     '/CBI_FastStore/cbiPythonTools/mesospim_utils/mesospim_utils/rl.py',
+        #     'convert-ims-dir-mesospim-tiles',
+        #     self.path,
+        #     '--res',
+        #     str(self.resolution_z),
+        #     str(self.resolution_xy),
+        #     str(self.resolution_xy)
+        # ]
         cmd = [
-            '/CBI_FastStore/cbiPythonTools/mesospim_utils/mesospim_utils/rl.py',
-            'convert-ims-dir-mesospim-tiles',
-            self.path,
-            '--res',
-            str(self.resolution_z),
-            str(self.resolution_xy),
-            str(self.resolution_xy)
+            '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
+            '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
+            'automated-method-slurm',
+            self.path
         ]
         print("COMMAND TO CONVERT TO IMS", cmd)
         subprocess.run(cmd)
