@@ -656,13 +656,17 @@ def check_mesoSPIM_processing():
         if len(settings_bin_file):
             settings_bin_file = settings_bin_file[0]
             total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
-            ims_files = sorted(glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*Tile*_Ch*_Sh*.ims')))
+            if dataset.refractive_index:
+                imaris_folder = os.path.join(dataset.path_on_fast_store, 'decon', 'ims_files')
+            else:
+                imaris_folder = os.path.join(dataset.path_on_fast_store, 'ims_files')
+            ims_files = sorted(glob(os.path.join(imaris_folder, '*Tile*_Ch*_Sh*.ims')))
             total_ims_files = len(ims_files)
             channels = dataset.get_total_MesoSPIM_colors_from_file_list()
             if total_ims_files == int(total_btf_files / channels):
                 all_ims_files_open = dataset.check_tile_ims_files()
                 if all_ims_files_open:
-                    montage_files = glob(os.path.join(dataset.path_on_fast_store, 'ims_files', '*ontage.ims'))
+                    montage_files = glob(os.path.join(imaris_folder, '*ontage.ims'))
                     if len(montage_files) > 0:
                         try:
                             ims_file = ims(montage_files[0])

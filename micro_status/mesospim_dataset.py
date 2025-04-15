@@ -25,7 +25,6 @@ class MesoSPIMDataset(Dataset):
             self.path = self.path_on_hive
         else:
             self.path = self.path_on_fast_store.replace('/CBI_FastStore', '/h20')
-        # self.z_layers = kwargs.get('z_layers')
         metadata_file = sorted(glob(os.path.join(self.path, '*.btf_meta.txt')))[0]
         f = open(metadata_file, 'r')
         lines = f.readlines()
@@ -34,6 +33,11 @@ class MesoSPIMDataset(Dataset):
         self.resolution_xy = int(xy_res)
         z = [l for l in lines if "[z_stepsize]" in l][0]
         z_res = re.findall(r"\d+\.\d+", z)[0]
+        self.refractive_index = None
+        ri = [l for l in lines if "[ETL CFG File]" in l][0]
+        ri_value = re.findall(r'_RI_([0-9]*\.[0-9]+)_\.csv$', ri)
+        if len(ri_value):
+            self.refractive_index = float(ri_value[0])
         self.resolution_z = int(float(z_res))
         self.settings_bin_file = None
         bin_files = sorted(glob(os.path.join(self.path, "*.bin")))
@@ -157,7 +161,6 @@ class MesoSPIMDataset(Dataset):
             'automated-method-slurm',
             self.path
         ]
-        print("COMMAND TO CONVERT TO IMS", cmd)
         subprocess.run(cmd)
 
     def check_tile_ims_files(self):
