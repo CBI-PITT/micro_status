@@ -265,63 +265,6 @@ class Dataset:
         con.close()
         self.imaging_status = "finished"
 
-    @classmethod
-    def initialize_from_db(cls, record):
-        pi_id = record[4]
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
-        con.close()
-        if pi_name:
-            pi_name = pi_name[0]
-
-        cl_number_id = record[3]
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
-        con.close()
-
-        if cl_number:
-            cl_number = cl_number[0]
-        obj = cls(
-            db_id=record[0],
-            name=record[1],
-            path_on_fast_store=record[2],
-            cl_number=cl_number,
-            pi=pi_name,
-            imaging_status=record[5],
-            processing_status=record[6],
-            path_on_hive=record[7],
-            job_number=record[8],
-            imaris_file_path=record[9],
-            channels=record[10],
-            z_layers_total=record[11],
-            z_layers_current=record[12],
-            ribbons_total=record[13],
-            ribbons_finished=record[14],
-            tiles_total=record[15],
-            tiles_finished=record[16],
-            tiles_x=record[17],
-            tiles_y=record[18],
-            resolution_xy=record[19],
-            resolution_z=record[20],
-            imaging_no_progress_time=record[21],
-            processing_no_progress_time=record[22],
-            processing_summray=record[23],
-            z_layers_checked=record[24],
-            keep_composites=record[25],
-            delete_405=record[26],
-            created=datetime.strptime(record[27], DATETIME_FORMAT),
-            modality=record[28],
-            is_brain=record[29],
-            peace_json_created=record[30],
-            imaging_summary=record[31],
-            moved=record[32],
-            moving=record[33],
-            paused=record[34]
-        )
-        return obj
-
     def update_path_on_hive(self, path_on_hive):
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()

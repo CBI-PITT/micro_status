@@ -48,7 +48,6 @@ Other warnings:
 pip install python-dotenv
 
 ROADMAP:
-    - mark MesoSPIM processing finished when it's stitched
     - track moving to hive
     - more informative processing statuses
     - respond to messages in threads
@@ -335,7 +334,7 @@ def check_RSCM_processing():
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
-        f'SELECT * FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
+        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
     ).fetchall()
     # if records:  # there's something to be stitched
     #     script_name = './run_rscm_cluster.sh'
@@ -347,21 +346,23 @@ def check_RSCM_processing():
     #     list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being processed
     #     list_and_kill_jobs('lab', "DASK_WORKER")
     #     list_and_kill_jobs('lab', "RSCM_Listen")
-    for record in records:
-        dataset = RSCMDataset.initialize_from_db(record)
+    for dataset_path in records:
+        print('dataset_path', dataset_path[0])
+        dataset = RSCMDataset(dataset_path[0])
         if dataset.check_being_stitched():
             dataset.update_processing_status('started')
             dataset.send_message('processing_started')
 
     # =========================  check stitching  ============================
+    print("=========================  check stitching  ============================")
 
     records = cur.execute(
-        'SELECT * FROM dataset WHERE processing_status="started" AND modality="rscm"'
+        'SELECT path_on_fast_store FROM dataset WHERE processing_status="started" AND modality="rscm"'
     ).fetchall()
     print("\nDataset instances where stitching started:")
-    for record in records:
-        dataset = RSCMDataset.initialize_from_db(record)
-        print("-----", dataset)
+    for dataset_path in records:
+        print("-----", dataset_path)
+        dataset = RSCMDataset(dataset_path[0])
         if dataset.check_stitching_complete():
             print("File in complete dir")
             # path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
@@ -395,11 +396,11 @@ def check_RSCM_processing():
             print("File in none of ClusterStitchTest dirs")
 
     # ====================  check denoising =====================
+    print("====================  check denoising =====================")
 
     records = cur.execute(
-        'SELECT * FROM dataset WHERE processing_status="stitched"'
+        'SELECT path_on_fast_store FROM dataset WHERE processing_status="stitched" AND modality="rscm"'
     ).fetchall()
-    print("\nDatasets that have been stitched:")
     # if records:  # there's something to be denoised
     #     script_name = './run_cbpy.sh'
     #     result = subprocess.run([script_name], check=True, text=True, capture_output=True)
@@ -408,11 +409,10 @@ def check_RSCM_processing():
     #     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     # else:
     #     list_and_kill_jobs('lab', "CBPy")  # TODO check that nothing is being processed
-
-    for record in records:
-        dataset = RSCMDataset.initialize_from_db(record)
-        print("-----", dataset)
-        print("Job dir", dataset.job_dir)
+    print("\nDatasets that have been STITCHED:")
+    for dataset_path in records:
+        print("-----", dataset_path)
+        dataset = RSCMDataset(dataset_path[0])
         if dataset.job_dir:
             print("Job dir is there")
             job_number = re.findall(r"\d+", os.path.basename(dataset.job_dir))[-1]
@@ -476,13 +476,15 @@ def check_RSCM_processing():
                         dataset.send_message('denoising_stuck')
 
     # ===================== check building imaris file ========================
+    print("===================== check building imaris file ========================")
+
     records = cur.execute(
-        'SELECT * FROM dataset WHERE processing_status="denoised"'
+        'SELECT path_on_fast_store FROM dataset WHERE processing_status="denoised" AND modality="rscm"'
     ).fetchall()
-    print("\nDataset instances that have been denoised:")
-    for record in records:
-        dataset = RSCMDataset.initialize_from_db(record)
-        print("-----", dataset)
+    print("\nDatasets that have been DENOISED:")
+    for dataset_path in records:
+        print("-----", dataset_path)
+        dataset = RSCMDataset(dataset_path[0])
         if os.path.exists(dataset.full_path_to_imaris_file):
             print("Imaris file exists")
             try:
@@ -558,11 +560,16 @@ def check_RSCM_processing():
             #             # dataset.send_message('ims_build_stuck')
 
     # Eventually datasets should be on hive
+    # ===================== check moving ========================
+    print("===================== check moving ========================")
+
     records = cur.execute(
-        'SELECT * FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moved=0'
+        'SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moved=0'
     ).fetchall()
-    for record in records:
-        dataset = RSCMDataset.initialize_from_db(record)
+    print("\nDatasets that should be moved:")
+    for dataset_path in records:
+        print("-----", dataset_path)
+        dataset = RSCMDataset(dataset_path[0])
         path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
         if os.path.exists(os.path.join(path_on_hive, 'vs_series.dat')):
             dataset.update_path_on_hive(path_on_hive)
@@ -582,17 +589,16 @@ def check_RSCM_processing():
                 dataset.send_message("processing_finished")
 
     # ==================== Handle 'paused' processing status ==================
+    print("===================== check paused datasets ========================")
     records = cur.execute(
-        'SELECT * FROM dataset WHERE processing_status="paused"'
+        'SELECT path_on_fast_store FROM dataset WHERE processing_status="paused" AND modality="rscm"'
     ).fetchall()
     print("\nDatasets that are in paused status:")
-    for record in records:
-        dataset = Dataset.initialize_from_db(record)
-        print("-----", dataset)
-        # TODO: see what stage processing is in
+    for dataset_path in records:
+        print("-----", dataset_path)
+        dataset = RSCMDataset(dataset_path[0])
         guessed_processing_status = dataset.guess_processing_status()
         print("guessed_processing_status:", guessed_processing_status)
-        # TODO: see if there's any progress at this stage
         progress_methods_map = {
             "started": dataset.check_stitching_progress,
             "stitched": dataset.check_denoising_progress,
@@ -786,10 +792,10 @@ def check_analysis():
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
-        f'SELECT * FROM dataset WHERE processing_status="finished" AND is_brain=1'
+        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="finished" AND is_brain=1'
     ).fetchall()
-    for record in records:
-        dataset = Dataset.initialize_from_db(record)
+    for dataset_path in records:
+        dataset = Dataset(dataset_path[0])
         print("Brain dataset", dataset)
         if not dataset.peace_json_created:
             dataset.create_peace_json()
