@@ -19,6 +19,22 @@ log = logging.getLogger(__name__)
 class RSCMDataset(Dataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        channels_bak = self.channels
+        try:
+            self.channels = self.count_channels()
+        except:
+            # self.channels = 1
+            pass
+        if channels_bak != self.channels:
+            self.update_db_field('channels', self.channels)
+        ribbons_total_bak = self.ribbons_total
+        try:
+            self.ribbons_total = self.get_ribbons_total()
+        except:
+            # self.ribbons_total = 0
+            pass
+        if self.ribbons_total != ribbons_total_bak:
+            self.update_db_field('ribbons_total', self.ribbons_total)
 
     def _specific_setup(self, **kwargs):
         print("In specific setup")
@@ -33,19 +49,18 @@ class RSCMDataset(Dataset):
         ribbons_finished = 0
         file_path = Path(self.path_on_fast_store)
         subdirs = os.scandir(file_path)
+        self.channels = self.count_channels()
         for subdir in subdirs:
             if subdir.is_file() or 'layer' not in subdir.name:
                 continue
             color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
-            channels = len(color_dirs)
             for color_dir in color_dirs:
                 images_dir = os.path.join(color_dir, 'images')
                 ribbons = len(os.listdir(images_dir))
                 ribbons_finished += ribbons
                 if ribbons < ribbons_in_z_layer:
                     break
-        # current_z_layer = re.findall(r"\d+", subdir.name)[-1]
-        ribbons_total = z_layers * channels * ribbons_in_z_layer
+        ribbons_total = z_layers * self.channels * ribbons_in_z_layer
 
         # update database record
         con = sqlite3.connect(DB_LOCATION)
@@ -61,6 +76,38 @@ class RSCMDataset(Dataset):
         self.ribbons_total = ribbons_total
         self.z_layers_current = z_layers - 1
         self.ribbons_finished = 0
+
+    def count_channels(self):
+        file_path = Path(self.path_on_fast_store)
+        subdirs = os.scandir(file_path)
+        channels = set()
+        for subdir in subdirs:
+            if subdir.is_file() or 'layer' not in subdir.name:
+                continue
+            color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
+            color_dirs = [x.split('/')[-1] for x in color_dirs]
+            channels.update(color_dirs)
+        print("Colors", channels)
+        channels = len(channels)
+        print("Channels", channels)
+        return channels
+
+    def get_ribbons_total(self):
+        with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
+            data = f.read()
+
+        soup = BeautifulSoup(data, "xml")
+        z_layers = int(soup.find('stack_slice_count').text)
+        ribbons_in_z_layer = int(soup.find('grid_cols').text)
+        ribbons_total = z_layers * self.channels * ribbons_in_z_layer
+        return ribbons_total
+
+    def get_z_layers(self):
+        with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
+            data = f.read()
+        soup = BeautifulSoup(data, "xml")
+        z_layers = int(soup.find('stack_slice_count').text)
+        return z_layers
 
     def check_imaging_progress(self):
         error_flag = False
@@ -392,7 +439,7 @@ class RSCMDataset(Dataset):
         print('expected raw composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.composites_dir, 'composite*.tif')))
         print('actual raw composites', actual_composites)
-        return expected_composites == actual_composites
+        return expected_composites >= actual_composites
 
     def check_all_raw_composites_same_size(self):
         files = sorted(glob(os.path.join(self.composites_dir, 'composite*.tif')))
@@ -528,8 +575,6 @@ class RSCMDataset(Dataset):
         if self.check_imaris_file_built():
             status = "finished"
         return status
-
-
 
 
 class Found(BaseException):

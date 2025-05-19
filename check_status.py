@@ -188,6 +188,7 @@ def check_RSCM_imaging():
                 dataset.send_message('ignoring_demo_dataset')
                 dataset.mark_imaging_finished()
                 dataset.update_processing_status('finished')
+                dataset.update_db_field("moved", 1)
                 continue
             dataset.send_message('imaging_started')
         else:
@@ -260,6 +261,7 @@ def check_mesoSPIM_imaging():
                 dataset.send_message('ignoring_demo_dataset')
                 dataset.mark_imaging_finished()
                 dataset.update_processing_status('finished')
+                dataset.update_db_field("moved", 1)
                 continue
             dataset.send_message('imaging_started')
         dataset = MesoSPIMDataset(file_path)
@@ -333,7 +335,7 @@ def check_RSCM_processing():
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
-        f'SELECT * FROM dataset WHERE processing_status="not_started" AND imaging_status="finished"'
+        f'SELECT * FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
     ).fetchall()
     # if records:  # there's something to be stitched
     #     script_name = './run_rscm_cluster.sh'
@@ -354,7 +356,7 @@ def check_RSCM_processing():
     # =========================  check stitching  ============================
 
     records = cur.execute(
-        'SELECT * FROM dataset WHERE processing_status="started"'
+        'SELECT * FROM dataset WHERE processing_status="started" AND modality="rscm"'
     ).fetchall()
     print("\nDataset instances where stitching started:")
     for record in records:
@@ -557,7 +559,7 @@ def check_RSCM_processing():
 
     # Eventually datasets should be on hive
     records = cur.execute(
-        'SELECT * FROM dataset WHERE modality = "rscm" AND processing_status="finished"'
+        'SELECT * FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moved=0'
     ).fetchall()
     for record in records:
         dataset = RSCMDataset.initialize_from_db(record)
@@ -674,7 +676,10 @@ def check_mesoSPIM_processing():
                             dataset.send_message('processing_finished')
                             dataset.start_moving()
                         except:
-                            print("Still stitching")
+                            print("Still building montage")
+                    else:
+                        print("Still stitching")
+                        dataset.check_auto_stitch()
                 else:
                     print("Found broken ims files")
             else:

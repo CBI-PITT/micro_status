@@ -48,3 +48,5 @@ dask_json = json.load(open("/CBI_FastStore/cbiPythonTools/RSCM/RSCM/dask_schedul
 DASK_DASHBOARD = dask_json['address'].replace("tcp", "http")[:-4] + '8787/'
 RESTRICT_MOVING_TIME = True
 MOVE_TIMES = {'start': 19, 'stop': 4}
+
+MESOSPIM_AUTO_STITCH_FOLDER = "/CBI_FastStore/tmp/stitch_jobs"

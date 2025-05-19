@@ -73,7 +73,7 @@ class MesoSPIMDataset(Dataset):
             print('tiles_imaged', tiles_imaged)
             tile_sizes = [os.path.getsize(x) for x in files]
             print("tile_sizes", tile_sizes)
-            if tiles_imaged == self.tiles_total:
+            if tiles_imaged >= self.tiles_total:
                 if len(set(tile_sizes)) == 1:  # imaging finished
                     self.mark_imaging_finished()
                     self.send_message('imaging_finished')
@@ -159,7 +159,7 @@ class MesoSPIMDataset(Dataset):
             '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
             '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
             'automated-method-slurm',
-            self.path
+            self.path if ' ' not in self.path else f'"{self.path}"'
         ]
         subprocess.run(cmd)
 
@@ -176,3 +176,35 @@ class MesoSPIMDataset(Dataset):
                 self.send_message("broken_ims_file")
                 all_good = False
         return all_good
+
+    def check_auto_stitch(self):
+        if self.refractive_index:
+            imaris_folder = os.path.join(self.path_on_fast_store, 'decon', 'ims_files')
+        else:
+            imaris_folder = os.path.join(self.path_on_fast_store, 'ims_files')
+        json_files = glob(os.path.join(imaris_folder, '*.json'))
+        if len(json_files):
+            stitching_json_file_name = os.path.basename(json_files[0])
+            stitching_json_file_error = os.path.join(MESOSPIM_AUTO_STITCH_FOLDER, 'error', stitching_json_file_name)
+            if os.path.exists(stitching_json_file_error):
+                print("Stitching error!!!!!!!!!!!!!!!!!!")
+                processing_summary = self.get_processing_summary()
+                value_from_db = processing_summary.get('stitching', {})
+                if value_from_db:
+                    already_in_error_folder = value_from_db.get('already_in_error_folder')
+                    if not already_in_error_folder:
+                        self.send_message('stitching_error')
+                        value_from_db.update({'stitching': {'already_in_error_folder': True}})
+                        self.update_processing_summary(value_from_db)
+                else:
+                    self.send_message('stitching_error')
+                    value_from_db.update({'stitching': {'already_in_error_folder': True}})
+                    self.update_processing_summary(value_from_db)
+            else:
+                processing_summary = self.get_processing_summary()
+                value_from_db = processing_summary.get('stitching')
+                if value_from_db:
+                    already_in_error_folder = value_from_db.get('already_in_error_folder')
+                    if already_in_error_folder:
+                        value_from_db.update({'stitching': {'already_in_error_folder': False}})
+                        self.update_processing_summary(value_from_db)
