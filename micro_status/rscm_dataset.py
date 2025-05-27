@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -137,18 +138,20 @@ class RSCMDataset(Dataset):
             z_layers_current = re.findall(r"\d+", os.path.basename(subdir))[-1]
         print("current imaging z layer :", z_layers_current)
 
-        finished = ribbons_finished == self.ribbons_total
+        finished = ribbons_finished >= self.ribbons_total
 
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET ribbons_finished = {ribbons_finished} WHERE id={self.db_id}')
-        con.commit()
-        con.close()
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET z_layers_current = {z_layers_current} WHERE id={self.db_id}')
-        con.commit()
-        con.close()
+        # con = sqlite3.connect(DB_LOCATION)
+        # cur = con.cursor()
+        # res = cur.execute(f'UPDATE dataset SET ribbons_finished = {ribbons_finished} WHERE id={self.db_id}')
+        # con.commit()
+        # con.close()
+        # con = sqlite3.connect(DB_LOCATION)
+        # cur = con.cursor()
+        # res = cur.execute(f'UPDATE dataset SET z_layers_current = {z_layers_current} WHERE id={self.db_id}')
+        # con.commit()
+        # con.close()
+        self.update_db_field("ribbons_finished", ribbons_finished)
+        self.update_db_field("z_layers_current", z_layers_current)
 
         ribbons_finished_prev = self.ribbons_finished
         self.ribbons_finished = ribbons_finished
@@ -266,24 +269,30 @@ class RSCMDataset(Dataset):
         return os.path.exists(txt_file_path)
 
     def check_stitching_progress(self):
-        response = requests.get(f'{DASK_DASHBOARD}info/main/workers.html')
-        soup = BeautifulSoup(response.content)
-        trs = soup.select('tr')
-        workers = {}
-        for tr in trs[1:]:
-            a = tr.find('td').find('a')
-            worker_url = a.attrs['href'].replace('../', f'{DASK_DASHBOARD}info/')
-            resp = requests.get(worker_url)
-            soup = BeautifulSoup(resp.content)
-            tables = soup.select('table')
-            rows = tables[2].select("tr")
-            workers[a.text] = len(rows) - 1
-        processing_summary = self.get_processing_summary()
-        workers_previous = processing_summary.get('stitching', {})
-        has_progress = workers != workers_previous
-        print("---------------------------stitching has progress", has_progress)
-        if has_progress:
-            self.update_processing_summary({"stitching": workers})
+        has_progress = False
+        DASK_DASHBOARD = None
+        if os.path.exists(DASK_JSON_PATH):
+            dask_json = json.load(open(DASK_JSON_PATH, "r"))
+            DASK_DASHBOARD = dask_json['address'].replace("tcp", "http")[:-4] + '8787/'
+        if DASK_DASHBOARD:
+            response = requests.get(f'{DASK_DASHBOARD}info/main/workers.html')
+            soup = BeautifulSoup(response.content)
+            trs = soup.select('tr')
+            workers = {}
+            for tr in trs[1:]:
+                a = tr.find('td').find('a')
+                worker_url = a.attrs['href'].replace('../', f'{DASK_DASHBOARD}info/')
+                resp = requests.get(worker_url)
+                soup = BeautifulSoup(resp.content)
+                tables = soup.select('table')
+                rows = tables[2].select("tr")
+                workers[a.text] = len(rows) - 1
+            processing_summary = self.get_processing_summary()
+            workers_previous = processing_summary.get('stitching', {})
+            has_progress = workers != workers_previous
+            print("---------------------------stitching has progress", has_progress)
+            if has_progress:
+                self.update_processing_summary({"stitching": workers})
         return has_progress
 
     def check_stitching_complete(self):

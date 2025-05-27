@@ -193,13 +193,13 @@ def check_RSCM_imaging():
         else:
             dataset = RSCMDataset(file_path)
             if dataset.imaging_status == 'in_progress':
-                print("Imaging status is 'in-progress'")
+                # print("Imaging status is 'in-progress'")
                 got_finished, has_progress, error_flag = dataset.check_imaging_progress()
                 if error_flag:
                     dataset.mark_paused()
                     dataset.send_message('broken_tiff_file')
                     continue
-                print("Imaging finished:", got_finished)
+                # print("Imaging finished:", got_finished)
                 if got_finished:
                     dataset.mark_imaging_finished()
                     dataset.send_message('imaging_finished')
@@ -209,7 +209,7 @@ def check_RSCM_imaging():
                     if '_cont_' not in dataset.name.lower():
                         dataset.start_processing()
                     continue
-                print("Imaging has progress:", has_progress)
+                # print("Imaging has progress:", has_progress)
                 if has_progress:
                     if dataset.imaging_no_progress_time:
                         dataset.mark_has_imaging_progress()
@@ -322,6 +322,7 @@ def list_and_kill_jobs(user, job_name=None):
 
     # List jobs
     result = subprocess.run(squeue_cmd, capture_output=True, text=True)
+    log.info(result.stdout)
     for line in result.stdout.splitlines()[1:]:  # Skip the header line
         parts = line.split()
         if parts:
@@ -330,22 +331,42 @@ def list_and_kill_jobs(user, job_name=None):
             subprocess.run(["scancel", job_id])
 
 
+def job_in_queue(user, job_name):
+    squeue_cmd = ["squeue", "-u", user]
+    if job_name:
+        squeue_cmd.extend(["-n", job_name])
+
+    # List jobs
+    result = subprocess.run(squeue_cmd, capture_output=True, text=True)
+    # log.info(result.stdout)
+    job_ids = []
+    for line in result.stdout.splitlines()[1:]:  # Skip the header line
+        parts = line.split()
+        if parts:
+            job_id = parts[0]
+            job_ids.append(job_id)
+    return len(job_ids) > 0
+
+
 def check_RSCM_processing():
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
         f'SELECT path_on_fast_store FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
     ).fetchall()
-    # if records:  # there's something to be stitched
-    #     script_name = './run_rscm_cluster.sh'
-    #     result = subprocess.run([script_name], check=True, text=True, capture_output=True)
-    #     print("!!!!!!!!!!!!!!!!! Launching RSCM cluster !!!!!!!!!!!!!!!!!!")
-    #     print(result.stdout)
-    #     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    # else:
-    #     list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being processed
-    #     list_and_kill_jobs('lab', "DASK_WORKER")
-    #     list_and_kill_jobs('lab', "RSCM_Listen")
+    print(">>>>>>>>>>>>>>>>>>>>> Records for stitching 1", records)
+
+    if records:  # there's something to be stitched
+        if not job_in_queue('lab', 'DASK_SCHED') or not job_in_queue('lab', 'DASK_WORKER'): # or not job_in_queue('lab', 'RSCM_Listen'):
+            log.info("!!!!!!!!!!!!!!!!! Launching RSCM cluster !!!!!!!!!!!!!!!!!!")
+            script_name = '/h20/home/lab/scripts/run_rscm_cluster.sh'
+            result = subprocess.run([script_name], text=True, capture_output=True)
+            log.info(result.stdout)
+            # listen_script = "/h20/home/lab/scripts/run_RSCM_stitch_listen.sh"
+            # result = subprocess.run(['sbatch', listen_script], text=True, capture_output=True)
+            # log.info(result.stdout)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
     for dataset_path in records:
         print('dataset_path', dataset_path[0])
         dataset = RSCMDataset(dataset_path[0])
@@ -359,6 +380,17 @@ def check_RSCM_processing():
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE processing_status="started" AND modality="rscm"'
     ).fetchall()
+    print(">>>>>>>>>>>>>>>>>>>>> Records for stitching 2", records)
+    if not records:  # nothing is being stitched. dask cluster can be stopped
+        moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moving=1 AND moved=0').fetchall()
+        print(">>>>>>>>>>>>>>>>>>> Records for moving", moving)
+        if not moving:
+            log.info("!!!!!!!!!!!!!!!!! Stopping RSCM cluster !!!!!!!!!!!!!!!!!!")
+            list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being moved
+            list_and_kill_jobs('lab', "DASK_WORKER")
+            list_and_kill_jobs('lab', "RSCM_Listen")
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
     print("\nDataset instances where stitching started:")
     for dataset_path in records:
         print("-----", dataset_path)
@@ -401,14 +433,18 @@ def check_RSCM_processing():
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE processing_status="stitched" AND modality="rscm"'
     ).fetchall()
-    # if records:  # there's something to be denoised
-    #     script_name = './run_cbpy.sh'
-    #     result = subprocess.run([script_name], check=True, text=True, capture_output=True)
-    #     print("!!!!!!!!!!!!!!!!! Launching CBPY !!!!!!!!!!!!!!!!!!")
-    #     print(result.stdout)
-    #     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    # else:
-    #     list_and_kill_jobs('lab', "CBPy")  # TODO check that nothing is being processed
+    if records:  # there's something to be denoised
+        if not job_in_queue('lab', 'CBPy'):
+            log.info("!!!!!!!!!!!!!!!!! Launching CBPY !!!!!!!!!!!!!!!!!!")
+            script_name = '/h20/home/lab/scripts/run_cbpy.sh'
+            result = subprocess.run(["sbatch", script_name], text=True, capture_output=True)
+            log.info(result.stdout)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    else:
+        log.info("!!!!!!!!!!!!!!!!! Stopping CBPY !!!!!!!!!!!!!!!!!!")
+        list_and_kill_jobs('lab', "CBPy")  # TODO check that nothing is being processed
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
     print("\nDatasets that have been STITCHED:")
     for dataset_path in records:
         print("-----", dataset_path)
@@ -492,8 +528,8 @@ def check_RSCM_processing():
                 ims_file = ims(dataset.full_path_to_imaris_file)
             except Exception as e:
                 log.error(f"ERROR opening imaris file: {e}")
-                # dataset.send_message("broken_ims_file")
-                dataset.update_processing_status('paused')
+                dataset.send_message("broken_ims_file")
+                dataset.update_db_field('processing_status', 'paused')
                 # dataset.requeue_ims()
 
                 # update ims_size=0 in processing_summary
@@ -504,7 +540,7 @@ def check_RSCM_processing():
                     dataset.update_processing_summary({'building_ims': value_from_db})
                 continue
             else:
-                dataset.update_processing_status('finished')
+                dataset.update_db_field('processing_status', 'finished')
                 dataset.send_message('built_ims')
                 if not dataset.keep_composites:
                     dataset.clean_up_denoised_composites()
@@ -566,6 +602,17 @@ def check_RSCM_processing():
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moved=0'
     ).fetchall()
+    if records:  # there's something to be stitched
+        if not job_in_queue('lab', 'DASK_SCHED') or not job_in_queue('lab', 'DASK_WORKER'): # or not job_in_queue('lab', 'RSCM_Listen'):
+            log.info("!!!!!!!!!!!!!!!!! Launching RSCM cluster !!!!!!!!!!!!!!!!!!")
+            script_name = '/h20/home/lab/scripts/run_rscm_cluster.sh'
+            result = subprocess.run([script_name], text=True, capture_output=True)
+            log.info(result.stdout)
+            # listen_script = "/h20/home/lab/scripts/run_RSCM_stitch_listen.sh"
+            # result = subprocess.run(['sbatch', listen_script], text=True, capture_output=True)
+            # log.info(result.stdout)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
     print("\nDatasets that should be moved:")
     for dataset_path in records:
         print("-----", dataset_path)
@@ -591,7 +638,7 @@ def check_RSCM_processing():
     # ==================== Handle 'paused' processing status ==================
     print("===================== check paused datasets ========================")
     records = cur.execute(
-        'SELECT path_on_fast_store FROM dataset WHERE processing_status="paused" AND modality="rscm"'
+        'SELECT path_on_fast_store FROM dataset WHERE modality="rscm" and paused=1'
     ).fetchall()
     print("\nDatasets that are in paused status:")
     for dataset_path in records:
@@ -612,8 +659,8 @@ def check_RSCM_processing():
             dataset.update_processing_status(guessed_processing_status)
         print("guessed_processing_status", guessed_processing_status)
         print("dataset.job_dir", dataset.job_dir)
-        print("os.path.exists(dataset.job_dir)", os.path.exists(dataset.job_dir))
-        if guessed_processing_status == "finished" and dataset.job_dir.startswith('/CBI_FastStore') and os.path.exists(dataset.job_dir):
+        # print("os.path.exists(dataset.job_dir)", os.path.exists(dataset.job_dir))
+        if guessed_processing_status == "finished" and dataset.job_dir and dataset.job_dir.startswith('/CBI_FastStore') and os.path.exists(dataset.job_dir):
             dataset.start_moving()
 
 
@@ -816,8 +863,8 @@ def scan():
         log.error(f"\nEXCEPTION: {e}\n")
         print(traceback.format_exc())
 
-    print("========================== Waiting 61 seconds ========================")
-    time.sleep(61)
+    print("========================== Waiting 60 seconds ========================")
+    time.sleep(60)
 
 
 def scan_debug():
@@ -837,5 +884,5 @@ if __name__ == "__main__":
     while True:
         scan()
         # scan_debug()
-        print("========================== Waiting 59 seconds ========================")
-        time.sleep(59)
+        # print("========================== Waiting 59 seconds ========================")
+        # time.sleep(59)

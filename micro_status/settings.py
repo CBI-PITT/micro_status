@@ -4,6 +4,8 @@ import json
 from dotenv import load_dotenv
 
 
+os.umask(0o002)
+
 FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/"
 RSCM_FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/RSCM"
 MESOSPIM_FASTSTORE_ACQUISITION_FOLDER = "/CBI_FastStore/Acquire/MesoSPIM"
@@ -11,7 +13,7 @@ HIVE_ACQUISITION_FOLDER = "/h20/Acquire/"
 RSCM_HIVE_ACQUISITION_FOLDER = "/h20/Acquire/RSCM"
 MESOSPIM_HIVE_ACQUISITION_FOLDER = "/h20/Acquire/MesoSPIM"
 DB_LOCATION = "/CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db"
-FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/tmp"
+FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
 HIVE_TRASH_LOCATION = "/h20/trash"
 
 SLACK_URL = "https://slack.com/api/chat.postMessage"
@@ -44,9 +46,15 @@ DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 PEACE_JSON_FOLDER = "/h20/CBI/Iana/json"
 BRAIN_DATA_PRODUCERS = ["klimstra", "cebra", "dutta", "dermody"]
 
-dask_json = json.load(open("/CBI_FastStore/cbiPythonTools/RSCM/RSCM/dask_scheduler_info.json", "r"))
-DASK_DASHBOARD = dask_json['address'].replace("tcp", "http")[:-4] + '8787/'
+DASK_JSON_PATH = "/CBI_FastStore/cbiPythonTools/RSCM/RSCM/dask_scheduler_info.json"
+if os.path.exists(DASK_JSON_PATH):
+    dask_json = json.load(open(DASK_JSON_PATH, "r"))
+    DASK_DASHBOARD = dask_json['address'].replace("tcp", "http")[:-4] + '8787/'
+else:
+    dask_json = None
+    DASK_DASHBOARD = None
+
 RESTRICT_MOVING_TIME = True
-MOVE_TIMES = {'start': 19, 'stop': 4}
+MOVE_TIMES = {'start': 17, 'stop': 6}
 
 MESOSPIM_AUTO_STITCH_FOLDER = "/CBI_FastStore/tmp/stitch_jobs"

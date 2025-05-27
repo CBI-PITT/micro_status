@@ -233,11 +233,13 @@ class Dataset:
         self.imaging_no_progress_time = progress_stopped_at
 
     def mark_paused(self):
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET imaging_status = "paused", paused = 1 WHERE id={self.db_id}')
-        con.commit()
-        con.close()
+        # con = sqlite3.connect(DB_LOCATION)
+        # cur = con.cursor()
+        # res = cur.execute(f'UPDATE dataset SET imaging_status = "paused", paused = 1 WHERE id={self.db_id}')
+        # con.commit()
+        # con.close()
+        self.update_db_field("imaging_status", "paused")
+        self.update_db_field("paused", 1)
         self.imaging_status = "paused"
         self.paused = True
 
@@ -250,19 +252,21 @@ class Dataset:
         self.imaging_no_progress_time = None
 
     def mark_resumed(self):
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET imaging_status = "in_progress" WHERE id={self.db_id}')
-        con.commit()
-        con.close()
+        # con = sqlite3.connect(DB_LOCATION)
+        # cur = con.cursor()
+        # res = cur.execute(f'UPDATE dataset SET imaging_status = "in_progress" WHERE id={self.db_id}')
+        # con.commit()
+        # con.close()
+        self.update_db_field("imaging_status", "in_progress")
         self.imaging_status = "in_progress"
 
     def mark_imaging_finished(self):
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET imaging_status = "finished" WHERE id={self.db_id}')
-        con.commit()
-        con.close()
+        # con = sqlite3.connect(DB_LOCATION)
+        # cur = con.cursor()
+        # res = cur.execute(f'UPDATE dataset SET imaging_status = "finished" WHERE id={self.db_id}')
+        # con.commit()
+        # con.close()
+        self.update_db_field("imaging_status", "finished")
         self.imaging_status = "finished"
 
     def update_path_on_hive(self, path_on_hive):
@@ -312,6 +316,7 @@ class Dataset:
         con.close()
 
     def mark_has_processing_progress(self):
+        self.update_db_field('paused', 0)
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET processing_no_progress_time = null WHERE id={self.db_id}')
@@ -319,6 +324,7 @@ class Dataset:
         con.close()
 
         self.processing_no_progress_time = None
+        self.paused = False
 
     def mark_no_processing_progress(self):
         progress_stopped_at = datetime.now().strftime(DATETIME_FORMAT)
@@ -478,6 +484,8 @@ class Dataset:
             self.moved = True
             self.update_db_field('moving', 0)
             self.moving = False
+            self.update_db_field('paused', 0)
+            self.paused = False
             path_on_hive = self.path_on_fast_store.replace(FASTSTORE_ACQUISITION_FOLDER, HIVE_ACQUISITION_FOLDER)
             if os.path.exists(path_on_hive):
                 self.update_db_field('path_on_hive', path_on_hive)
