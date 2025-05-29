@@ -380,10 +380,8 @@ def check_RSCM_processing():
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE processing_status="started" AND modality="rscm"'
     ).fetchall()
-    print(">>>>>>>>>>>>>>>>>>>>> Records for stitching 2", records)
     if not records:  # nothing is being stitched. dask cluster can be stopped
         moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moving=1 AND moved=0').fetchall()
-        print(">>>>>>>>>>>>>>>>>>> Records for moving", moving)
         if not moving:
             log.info("!!!!!!!!!!!!!!!!! Stopping RSCM cluster !!!!!!!!!!!!!!!!!!")
             list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being moved
@@ -407,7 +405,8 @@ def check_RSCM_processing():
                 print("All composites same size: ", dataset.check_all_raw_composites_same_size())
         elif dataset.check_stitching_errored():
             print("File in error dir")
-            dataset.update_processing_status('paused')
+            # dataset.update_processing_status('paused')
+            dataset.update_db_field('paused', '1')
             dataset.send_message('stitching_error')
         elif dataset.check_being_stitched():
             print("File in processing dir")
@@ -422,7 +421,8 @@ def check_RSCM_processing():
                 else:
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                        dataset.update_processing_status('paused')
+                        # dataset.update_processing_status('paused')
+                        dataset.update_db_field('paused', '1')
                         dataset.send_message('stitching_stuck')
         else:
             print("File in none of ClusterStitchTest dirs")
@@ -469,7 +469,8 @@ def check_RSCM_processing():
                     else:
                         progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                            dataset.update_processing_status('paused')
+                            # dataset.update_processing_status('paused')
+                            dataset.update_db_field('paused', 1)
                             dataset.send_message('denoising_stuck')
                 # check that something else is being denoised and making progress
                 cbpy_works = dataset.check_cbpy_works()
@@ -529,7 +530,8 @@ def check_RSCM_processing():
             except Exception as e:
                 log.error(f"ERROR opening imaris file: {e}")
                 dataset.send_message("broken_ims_file")
-                dataset.update_db_field('processing_status', 'paused')
+                # dataset.update_db_field('processing_status', 'paused')
+                dataset.update_db_field('paused', '1')
                 # dataset.requeue_ims()
 
                 # update ims_size=0 in processing_summary
@@ -559,7 +561,7 @@ def check_RSCM_processing():
                 else:
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                        dataset.update_processing_status('paused')
+                        dataset.update_db_field('paused', 1)
                         # dataset.send_message('ims_build_stuck')
                         #dataset.requeue_ims()
                         #dataset.send_message('requeue_ims')
@@ -602,7 +604,7 @@ def check_RSCM_processing():
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moved=0'
     ).fetchall()
-    if records:  # there's something to be stitched
+    if records and can_be_moved():  # there's something to be stitched
         if not job_in_queue('lab', 'DASK_SCHED') or not job_in_queue('lab', 'DASK_WORKER'): # or not job_in_queue('lab', 'RSCM_Listen'):
             log.info("!!!!!!!!!!!!!!!!! Launching RSCM cluster !!!!!!!!!!!!!!!!!!")
             script_name = '/h20/home/lab/scripts/run_rscm_cluster.sh'
@@ -863,8 +865,8 @@ def scan():
         log.error(f"\nEXCEPTION: {e}\n")
         print(traceback.format_exc())
 
-    print("========================== Waiting 60 seconds ========================")
-    time.sleep(60)
+    print("========================== Waiting 30 seconds ========================")
+    time.sleep(30)
 
 
 def scan_debug():
