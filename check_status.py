@@ -850,6 +850,14 @@ def check_analysis():
             dataset.create_peace_json()
 
 
+def db_backup():
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    backup_file_name = os.path.join(DB_BACKUPS_DIR, os.path.basename(DB_LOCATION).replace('.db', f'-{timestamp}.db'))
+    if not os.path.exists(backup_file_name):
+        import shutil
+        shutil.copyfile(DB_LOCATION, backup_file_name)
+
+
 def scan():
     try:
         check_storage()
@@ -859,7 +867,7 @@ def scan():
         check_mesoSPIM_processing()
         move_files()
         check_moving()
-        # TODO db_backup()
+        db_backup()
         # check_analysis()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
@@ -877,7 +885,7 @@ def scan_debug():
     check_mesoSPIM_processing()
     move_files()
     check_moving()
-    # TODO db_backup()
+    db_backup()
     # check_analysis()
     time.sleep(10)
 
