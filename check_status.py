@@ -377,12 +377,15 @@ def check_RSCM_processing():
     # =========================  check stitching  ============================
     print("=========================  check stitching  ============================")
 
-    records = cur.execute(
+    records_not_started = cur.execute(
+        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
+    ).fetchall()
+    records_started = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE processing_status="started" AND modality="rscm"'
     ).fetchall()
-    if not records:  # nothing is being stitched. dask cluster can be stopped
-        moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moving=1 AND moved=0').fetchall()
-        if not moving:
+    if not records_not_started and not records_started:  # nothing is being stitched. dask cluster can be stopped
+        records_moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moving=1 AND moved=0').fetchall()
+        if not records_moving:
             log.info("!!!!!!!!!!!!!!!!! Stopping RSCM cluster !!!!!!!!!!!!!!!!!!")
             list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being moved
             list_and_kill_jobs('lab', "DASK_WORKER")
@@ -390,7 +393,7 @@ def check_RSCM_processing():
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
     print("\nDataset instances where stitching started:")
-    for dataset_path in records:
+    for dataset_path in records_started:
         print("-----", dataset_path)
         dataset = RSCMDataset(dataset_path[0])
         if dataset.check_stitching_complete():
@@ -431,7 +434,7 @@ def check_RSCM_processing():
     print("====================  check denoising =====================")
 
     records = cur.execute(
-        'SELECT path_on_fast_store FROM dataset WHERE processing_status="stitched" AND modality="rscm"'
+        'SELECT path_on_fast_store FROM dataset WHERE processing_status="stitched" AND modality="rscm" and paused=0'
     ).fetchall()
     if records:  # there's something to be denoised
         if not job_in_queue('lab', 'CBPy'):
@@ -516,7 +519,7 @@ def check_RSCM_processing():
     print("===================== check building imaris file ========================")
 
     records = cur.execute(
-        'SELECT path_on_fast_store FROM dataset WHERE processing_status="denoised" AND modality="rscm"'
+        'SELECT path_on_fast_store FROM dataset WHERE processing_status="denoised" AND modality="rscm" and paused=0'
     ).fetchall()
     print("\nDatasets that have been DENOISED:")
     for dataset_path in records:
@@ -713,6 +716,7 @@ def check_mesoSPIM_processing():
         if len(settings_bin_file):
             settings_bin_file = settings_bin_file[0]
             total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
+            print(">>>>>>>>>>>>>>>>dataset.refractive_index", dataset.refractive_index)
             if dataset.refractive_index:
                 imaris_folder = os.path.join(dataset.path_on_fast_store, 'decon', 'ims_files')
             else:
