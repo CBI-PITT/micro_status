@@ -222,8 +222,7 @@ def check_RSCM_imaging():
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                             dataset.mark_paused()
                             dataset.send_message('imaging_paused')
-            elif dataset.imaging_status == 'paused':
-                print("Imaging status is 'paused'")
+            elif dataset.imaging_status == 'needs_attention':
                 finished, has_progress, error_flag = dataset.check_imaging_progress()  # maybe imaging resumed
                 if not has_progress:
                     continue
@@ -276,7 +275,7 @@ def check_mesoSPIM_imaging():
             dataset.start_processing()
             dataset.update_processing_status('in_progress')
             dataset.send_message('processing_started')
-        elif dataset.imaging_status == "paused":
+        elif dataset.imaging_status == "needs_attention":
             pass  # TODO check status again
 
 
@@ -408,7 +407,7 @@ def check_RSCM_processing():
                 print("All composites same size: ", dataset.check_all_raw_composites_same_size())
         elif dataset.check_stitching_errored():
             print("File in error dir")
-            # dataset.update_processing_status('paused')
+            dataset.update_processing_status('needs_attention')
             dataset.update_db_field('paused', '1')
             dataset.send_message('stitching_error')
         elif dataset.check_being_stitched():
@@ -472,7 +471,7 @@ def check_RSCM_processing():
                     else:
                         progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                            # dataset.update_processing_status('paused')
+                            dataset.update_processing_status('needs_attention')
                             dataset.update_db_field('paused', 1)
                             dataset.send_message('denoising_stuck')
                 # check that something else is being denoised and making progress
@@ -488,7 +487,7 @@ def check_RSCM_processing():
                     else:
                         progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                            dataset.update_processing_status('paused')
+                            dataset.update_processing_status('needs_attention')
                             dataset.send_message('denoising_stuck')
                 continue
 
@@ -512,7 +511,7 @@ def check_RSCM_processing():
                 else:
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                        dataset.update_processing_status('paused')
+                        dataset.update_processing_status('needs_attention')
                         dataset.send_message('denoising_stuck')
 
     # ===================== check building imaris file ========================
@@ -533,7 +532,7 @@ def check_RSCM_processing():
             except Exception as e:
                 log.error(f"ERROR opening imaris file: {e}")
                 dataset.send_message("broken_ims_file")
-                # dataset.update_db_field('processing_status', 'paused')
+                dataset.update_db_field('processing_status', 'needs_attention')
                 dataset.update_db_field('paused', '1')
                 # dataset.requeue_ims()
 
@@ -932,7 +931,6 @@ def summary_message():
         conn = sqlite3.connect(DB_LOCATION)
         cursor = conn.cursor()
         row_id = cursor.execute("SELECT id FROM warning WHERE type = 'daily_summary'").fetchone()
-        print(">>>>>>>>>>>>>>>>>>>>row", row_id)
         res = cursor.execute(f'UPDATE warning SET active = 1 WHERE id={row_id[0]}')
         conn.commit()
         conn.close()
@@ -940,7 +938,6 @@ def summary_message():
         conn = sqlite3.connect(DB_LOCATION)
         cursor = conn.cursor()
         row = cursor.execute("SELECT message_sent, active FROM warning WHERE type = 'daily_summary'").fetchone()
-        print(">>>>>>>>>>>>>>>>>>>>row (all)", row)
         conn.close()
         # if daily_summary has message_sent=1: do nothing
         message_sent = int(row[0])

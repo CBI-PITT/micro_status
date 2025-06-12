@@ -72,8 +72,9 @@ class MesoSPIMDataset(Dataset):
             tiles_imaged = len(files)
             print('tiles_imaged', tiles_imaged)
             tile_sizes = [os.path.getsize(x) for x in files]
-            print("tile_sizes", tile_sizes)
+            print("tile_sizes", set(tile_sizes))
             if tiles_imaged >= self.tiles_total:
+                print("All tiles are there!")
                 if len(set(tile_sizes)) == 1:  # imaging finished
                     self.mark_imaging_finished()
                     self.send_message('imaging_finished')
@@ -107,7 +108,7 @@ class MesoSPIMDataset(Dataset):
                         if self.imaging_no_progress_time:
                             progress_stopped_at = datetime.strptime(self.imaging_no_progress_time, DATETIME_FORMAT)
                             if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                                # self.mark_paused()
+                                self.mark_paused()
                                 # self.send_message('imaging_paused')
                                 print("CHECK IMAGING! May be paused")
                         else:

@@ -170,6 +170,7 @@ class Dataset:
         raise NotImplementedError("Subclasses must implement this method")
 
     def update_db_field(self, field_name, field_value):
+        print(">>>>>>>>>>>>>>>updating DB field", field_name, "to", field_value)
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET {field_name} = "{field_value}" WHERE id={self.db_id}')
@@ -233,14 +234,9 @@ class Dataset:
         self.imaging_no_progress_time = progress_stopped_at
 
     def mark_paused(self):
-        # con = sqlite3.connect(DB_LOCATION)
-        # cur = con.cursor()
-        # res = cur.execute(f'UPDATE dataset SET imaging_status = "paused", paused = 1 WHERE id={self.db_id}')
-        # con.commit()
-        # con.close()
-        self.update_db_field("imaging_status", "paused")
+        self.update_db_field("imaging_status", "needs_attention")
         self.update_db_field("paused", 1)
-        self.imaging_status = "paused"
+        self.imaging_status = "needs_attention"
         self.paused = True
 
     def mark_has_imaging_progress(self):
@@ -317,6 +313,7 @@ class Dataset:
 
     def mark_has_processing_progress(self):
         self.update_db_field('paused', 0)
+        self.update_db_field('processing_status', 'in_progress')
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET processing_no_progress_time = null WHERE id={self.db_id}')
@@ -325,6 +322,7 @@ class Dataset:
 
         self.processing_no_progress_time = None
         self.paused = False
+        self.processing_status = "in_progress"
 
     def mark_no_processing_progress(self):
         progress_stopped_at = datetime.now().strftime(DATETIME_FORMAT)
@@ -378,9 +376,6 @@ class Dataset:
                 file_opens = False
         return file_exists and file_opens
 
-
-    # def check_finalization_progress(self):
-    #     pass
 
     def start_moving(self):
         """create txt file in the RSCM queue stitch directory
