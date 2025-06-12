@@ -861,6 +861,113 @@ def db_backup():
         import shutil
         shutil.copyfile(DB_LOCATION, backup_file_name)
 
+def summary_message():
+    def get_status_summary():
+        conn = sqlite3.connect(DB_LOCATION)
+        cursor = conn.cursor()
+
+        # Datasets currently being imaged
+        cursor.execute("SELECT path_on_fast_store FROM dataset WHERE imaging_status = 'in_progress'")
+        imaging = [row[0] for row in cursor.fetchall()]
+
+        # Datasets currently being processed
+        cursor.execute("SELECT path_on_fast_store FROM dataset WHERE processing_status = 'in_progress'")
+        processing = [row[0] for row in cursor.fetchall()]
+
+        # Datasets that need attention
+        cursor.execute("SELECT path_on_fast_store FROM dataset WHERE paused = 1")
+        paused = [row[0] for row in cursor.fetchall()]
+
+        conn.close()
+        return imaging, processing, paused
+
+    def format_message(imaging, processing, paused):
+        today = datetime.now().strftime('%Y-%m-%d')
+        message = f"*📊 Daily Dataset Status – {today}*\n"
+
+        if imaging:
+            message += "\n🔬 *Imaging in progress:*\n" + "\n".join([f"• {ds}" for ds in imaging])
+        else:
+            message += "\n🔬 *Imaging in progress:* None"
+
+        if processing:
+            message += "\n\n🧮 *Processing in progress:*\n" + "\n".join([f"• {ds}" for ds in processing])
+        else:
+            message += "\n\n🧮 *Processing in progress:* None"
+
+        if paused:
+            message += "\n\n🚨 *Needs attention:*\n" + "\n".join([f"• {ds}" for ds in paused])
+        else:
+            message += "\n\n✅ *No datasets require attention.*"
+
+        return message
+
+    def post_to_slack(msg_text, channel, header):
+        print(msg_text)
+        payload = {
+            "channel": channel,
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": msg_text
+                    }
+                }
+            ]
+        }
+        if MESSAGES_ENABLED:  # doing this check here to be able to save message to logs
+            response = requests.post(SLACK_URL, data=json.dumps(payload), headers=header)
+
+    import pytz
+    # Get the current time in UTC
+    current_time_utc = datetime.now(pytz.utc)
+    # Get the local timezone
+    local_timezone = pytz.timezone('America/New_York')
+    # Convert UTC time to local time
+    local_time = current_time_utc.astimezone(local_timezone)
+    print("local_time.hour", local_time.hour)
+    if local_time.hour >= 9:
+        # update Warning table with active=1
+        conn = sqlite3.connect(DB_LOCATION)
+        cursor = conn.cursor()
+        row_id = cursor.execute("SELECT id FROM warning WHERE type = 'daily_summary'").fetchone()
+        print(">>>>>>>>>>>>>>>>>>>>row", row_id)
+        res = cursor.execute(f'UPDATE warning SET active = 1 WHERE id={row_id[0]}')
+        conn.commit()
+        conn.close()
+        # query Warning table
+        conn = sqlite3.connect(DB_LOCATION)
+        cursor = conn.cursor()
+        row = cursor.execute("SELECT message_sent, active FROM warning WHERE type = 'daily_summary'").fetchone()
+        print(">>>>>>>>>>>>>>>>>>>>row (all)", row)
+        conn.close()
+        # if daily_summary has message_sent=1: do nothing
+        message_sent = int(row[0])
+        active = int(row[1])
+        print("message_sent", message_sent)
+        print("active", active)
+        # if daily_summary has message_sent=0 and active=1: send message
+        if message_sent == 0 and active == 1:
+            imaging, processing, paused = get_status_summary()
+            msg = format_message(imaging, processing, paused)
+            post_to_slack(msg, SLACK_CHANNEL_ID, SLACK_HEADERS)
+
+            # update Warning table with message_sent=1
+            conn = sqlite3.connect(DB_LOCATION)
+            cursor = conn.cursor()
+            res = cursor.execute(f'UPDATE warning SET message_sent = 1 WHERE id={row_id[0]}')
+            conn.commit()
+            conn.close()
+    else:
+        # update Warning table with message_sent=0 and active=0
+        conn = sqlite3.connect(DB_LOCATION)
+        cursor = conn.cursor()
+        row_id = cursor.execute("SELECT id FROM warning WHERE type = 'daily_summary'").fetchone()
+        res = cursor.execute(f'UPDATE warning SET active = 0, message_sent = 0 WHERE id={row_id[0]}')
+        conn.commit()
+        conn.close()
+
 
 def scan():
     try:
@@ -873,6 +980,7 @@ def scan():
         check_moving()
         db_backup()
         # check_analysis()
+        summary_message()
     except Exception as e:
         log.error(f"\nEXCEPTION: {e}\n")
         print(traceback.format_exc())
@@ -891,6 +999,7 @@ def scan_debug():
     check_moving()
     db_backup()
     # check_analysis()
+    summary_message()
     time.sleep(10)
 
 
