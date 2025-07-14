@@ -35,7 +35,7 @@ class MesoSPIMDataset(Dataset):
         z_res = re.findall(r"\d+\.\d+", z)[0]
         self.refractive_index = None
         ri = [l for l in lines if "[ETL CFG File]" in l][0]
-        ri_value = re.findall(r'_RI_([0-9]*\.[0-9]+)_\.csv$', ri)
+        ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_", ri)
         if len(ri_value):
             self.refractive_index = float(ri_value[0])
         self.resolution_z = int(float(z_res))
