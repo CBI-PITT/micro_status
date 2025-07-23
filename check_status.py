@@ -163,6 +163,7 @@ def check_if_new(file_path):
 
 
 def check_RSCM_imaging():
+    print("\n ================ Checking RSCM Imaging ==============\n")
     # Discover all vs_series.dat files in the acquisition directory
     datasets = []
     for root, dirs, files in os.walk(RSCM_FASTSTORE_ACQUISITION_FOLDER):
@@ -172,26 +173,46 @@ def check_RSCM_imaging():
                 file_path = file_path.parent
                 if 'stack' in str(file_path.name):
                     datasets.append(str(file_path))
-    print("Unique datasets found: ", len(datasets))
+    print("\tUnique RSCM datasets found: ", len(datasets))
 
     for file_path in datasets:
-        print("Working on: ", file_path)
+        # print("Working on: ", file_path)
         is_new = check_if_new(file_path)
+        new_dataset_marker_json = os.path.join(file_path, NEW_DATASET_MARKER_FILENAME)
         if is_new:
-            log.info("-----------------------New dataset--------------------------")
-            dataset = RSCMDataset.create(file_path)
-            if "demo" in dataset.name.lower():
-                # demo dataset
-                log.info(f"Ignoring demo dataset {dataset}")
-                print(f"Ignoring demo dataset {dataset}")
-                dataset.send_message('ignoring_demo_dataset')
-                dataset.mark_imaging_finished()
-                dataset.update_processing_status('finished')
-                dataset.update_db_field("moved", 1)
-                continue
-            dataset.send_message('imaging_started')
+            log.info(f"\t--- New RSCM dataset at {file_path} ---")
+            # check whether it's an existing dataset that got renamed
+            if os.path.exists(new_dataset_marker_json):
+                print("\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
+                # read .microstatus.json file in the root folder of the dataset
+                old_path_data = json.load(open(new_dataset_marker_json, 'r'))
+                old_path = old_path_data['path']
+                dataset = RSCMDataset(old_path)
+                dataset.update_db_field('path_on_fast_store', file_path)
+                dataset.path_on_fast_store = file_path
+            else:
+                dataset = RSCMDataset.create(file_path)
+                # create .microstatus.json file in the root folder of the dataset
+                path_data = {"path": file_path}
+                json.dump(path_data, open(new_dataset_marker_json, "w"))
+                if "demo" in dataset.name.lower():
+                    # demo dataset
+                    log.info(f"Ignoring demo dataset {dataset}")
+                    print(f"Ignoring demo dataset {dataset}")
+                    dataset.send_message('ignoring_demo_dataset')
+                    dataset.mark_imaging_finished()
+                    dataset.update_processing_status('finished')
+                    dataset.update_db_field("moved", 1)
+                    continue
+                dataset.send_message('imaging_started')
         else:
             dataset = RSCMDataset(file_path)
+            # Create .microstatus.json file in the root folder of the dataset if it doesn't exist
+            # This is for old datasets. Can be removed after all old datasets get moved to h20
+            if not os.path.exists(new_dataset_marker_json):
+                path_data = {"path": file_path}
+                json.dump(path_data, open(new_dataset_marker_json, "w"))
+
             if dataset.imaging_status == 'in_progress':
                 # print("Imaging status is 'in-progress'")
                 got_finished, has_progress, error_flag = dataset.check_imaging_progress()
@@ -234,7 +255,7 @@ def check_RSCM_imaging():
 
 
 def check_mesoSPIM_imaging():
-    print("Checking MesoSPIM imaging")
+    print("\n ================ Checking MesoSPIM imaging ===============\n")
     # Discover all metadata files in the acquisition directory
     datasets = set()
     for root, dirs, files in os.walk(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
@@ -243,26 +264,41 @@ def check_mesoSPIM_imaging():
                 file_path = Path(os.path.join(root, file))
                 file_path = file_path.parent
                 datasets.add(str(file_path))
-    print("Unique datasets found: ", len(datasets))
-    print(*datasets, sep="\n")
+    print("\tUnique MesoSPIM datasets found: ", len(datasets))
 
     for file_path in list(datasets):
-        print("\nWorking on: ", file_path)
         is_new = check_if_new(file_path)
+        new_dataset_marker_json = os.path.join(file_path, NEW_DATASET_MARKER_FILENAME)
         if is_new:
-            log.info("-----------------------New mesoSPIM dataset--------------------------")
-            dataset = MesoSPIMDataset.create(file_path)
-            if "demo" in dataset.name:
-                # demo dataset
-                log.info(f"Ignoring demo dataset {dataset}")
-                print(f"Ignoring demo dataset {dataset}")
-                dataset.send_message('ignoring_demo_dataset')
-                dataset.mark_imaging_finished()
-                dataset.update_processing_status('finished')
-                dataset.update_db_field("moved", 1)
-                continue
-            dataset.send_message('imaging_started')
+            log.info(f"\t--- New mesoSPIM dataset at {file_path} ---")
+            if os.path.exists(new_dataset_marker_json):
+                print("\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
+                # # read .microstatus.json file in the root folder of the dataset
+                old_path_data = json.load(open(new_dataset_marker_json, 'r'))
+                old_path = old_path_data['path']
+                dataset = MesoSPIMDataset(old_path)
+                dataset.update_db_field('path_on_fast_store', file_path)
+                dataset.path_on_fast_store = file_path
+            else:
+                dataset = MesoSPIMDataset.create(file_path)
+                # create .microstatus.json file in the root folder of the dataset
+                path_data = {"path": file_path}
+                json.dump(path_data, open(new_dataset_marker_json, "w"))
+                if "demo" in dataset.name:
+                    # demo dataset
+                    log.info(f"Ignoring demo dataset {dataset}")
+                    print(f"Ignoring demo dataset {dataset}")
+                    dataset.send_message('ignoring_demo_dataset')
+                    dataset.mark_imaging_finished()
+                    dataset.update_processing_status('finished')
+                    dataset.update_db_field("moved", 1)
+                    continue
+                dataset.send_message('imaging_started')
+
         dataset = MesoSPIMDataset(file_path)
+        if not os.path.exists(new_dataset_marker_json):
+            path_data = {"path": file_path}
+            json.dump(path_data, open(new_dataset_marker_json, "w"))
         # check whether imaging finished or paused
         if dataset.imaging_status == 'in_progress':
             dataset.check_imaging_progress()
@@ -353,7 +389,6 @@ def check_RSCM_processing():
     records = cur.execute(
         f'SELECT path_on_fast_store FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
     ).fetchall()
-    print(">>>>>>>>>>>>>>>>>>>>> Records for stitching 1", records)
 
     if records:  # there's something to be stitched
         if not job_in_queue('lab', 'DASK_SCHED') or not job_in_queue('lab', 'DASK_WORKER'): # or not job_in_queue('lab', 'RSCM_Listen'):
@@ -386,9 +421,9 @@ def check_RSCM_processing():
         records_moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moving=1 AND moved=0').fetchall()
         if not records_moving:
             log.info("!!!!!!!!!!!!!!!!! Stopping RSCM cluster !!!!!!!!!!!!!!!!!!")
-            list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being moved
-            list_and_kill_jobs('lab', "DASK_WORKER")
-            list_and_kill_jobs('lab', "RSCM_Listen")
+            # list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being moved
+            # list_and_kill_jobs('lab', "DASK_WORKER")
+            # list_and_kill_jobs('lab', "RSCM_Listen")
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
     print("\nDataset instances where stitching started:")
@@ -429,6 +464,14 @@ def check_RSCM_processing():
         else:
             print("File in none of ClusterStitchTest dirs")
 
+        if dataset.job_dir:
+            if dataset.check_imaris_file_built():
+                dataset.update_db_field('processing_status', 'finished')
+                dataset.send_message('built_ims')
+                if not dataset.keep_composites:
+                    dataset.clean_up_denoised_composites()
+                dataset.start_moving()
+
     # ====================  check denoising =====================
     print("====================  check denoising =====================")
 
@@ -444,7 +487,7 @@ def check_RSCM_processing():
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     else:
         log.info("!!!!!!!!!!!!!!!!! Stopping CBPY !!!!!!!!!!!!!!!!!!")
-        list_and_kill_jobs('lab', "CBPy")  # TODO check that nothing is being processed
+        # list_and_kill_jobs('lab', "CBPy")  # TODO check that nothing is being processed
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
     print("\nDatasets that have been STITCHED:")
@@ -701,8 +744,12 @@ def check_mesoSPIM_processing():
     print("Checking MesoSPIM processing")
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
+    # datasets where either decon or imaris conversion has started
+    # if refractive_index is given, check whether decon finished or in progress. If finished, update status to "decon_done"
+    # if no refractive index, check whether imaris files are fully converted
+    # check if Montage file present (just in case)
     records = cur.execute(
-        f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="in_progress"'
+        f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="in_progress" AND paused=0'
     ).fetchall()
     for dataset_path in records:
         print('dataset_path', dataset_path[0])
@@ -716,9 +763,20 @@ def check_mesoSPIM_processing():
             settings_bin_file = settings_bin_file[0]
             total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
             print(">>>>>>>>>>>>>>>>dataset.refractive_index", dataset.refractive_index)
-            if dataset.refractive_index:
-                imaris_folder = os.path.join(dataset.path_on_fast_store, 'decon', 'ims_files')
-            else:
+            if dataset.refractive_index:  # decon will be done
+                decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
+                imaris_folder = os.path.join(decon_folder, 'ims_files')
+                decon_tif_files = os.listdir(decon_folder)
+                decon_tif_files = [x for x in decon_tif_files if x.endswith('.tif') and not x.startswith('psf_')]
+                if len(decon_tif_files) == total_btf_files:
+                    # check all tiff files are the same size
+                    tif_sizes = [os.path.getsize(os.path.join(decon_folder, x)) for x in decon_tif_files]
+                    print("decon tif sizes", set(tif_sizes))
+                    if len(set(tif_sizes)) == 1:
+                        # decon finished
+                        dataset.update_processing_status("decon_done")
+                        log.info(f"Changed processing status to decon_done for {dataset}")
+            else:  # no decon
                 imaris_folder = os.path.join(dataset.path_on_fast_store, 'ims_files')
             ims_files = sorted(glob(os.path.join(imaris_folder, '*Tile*_Ch*_Sh*.ims')))
             total_ims_files = len(ims_files)
@@ -726,11 +784,14 @@ def check_mesoSPIM_processing():
             if total_ims_files == int(total_btf_files / channels):
                 all_ims_files_open = dataset.check_tile_ims_files()
                 if all_ims_files_open:
+                    dataset.update_processing_status("ims_converted")
+                    log.info(f"Changed processing status to ims_converted for {dataset}")
                     montage_files = glob(os.path.join(imaris_folder, '*ontage.ims'))
                     if len(montage_files) > 0:
                         try:
                             ims_file = ims(montage_files[0])
                             dataset.update_processing_status('finished')
+                            log.info(f"Changed processing status to finished for {dataset}")
                             dataset.send_message('processing_finished')
                             dataset.start_moving()
                         except:
@@ -742,7 +803,69 @@ def check_mesoSPIM_processing():
                     print("Found broken ims files")
             else:
                 print("processing still in progress")
-    # TODO message if processing paused
+        else:
+            dataset.mark_paused()
+            dataset.update_processing_status('needs_attention')
+
+    # check datasets where decon is done
+    records = cur.execute(
+        f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="decon_done" and paused=0'
+    ).fetchall()
+    for dataset_path in records:
+        print('dataset_path', dataset_path[0])
+        try:
+            dataset = MesoSPIMDataset(dataset_path[0])
+        except:
+            print("WARNING: Invalid dataset at", dataset_path[0])
+            continue
+        decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
+        imaris_folder = os.path.join(decon_folder, 'ims_files')
+        ims_files = sorted(glob(os.path.join(imaris_folder, '*Tile*_Ch*_Sh*.ims')))
+        total_ims_files = len(ims_files)
+        channels = dataset.get_total_MesoSPIM_colors_from_file_list()
+        settings_bin_file = sorted(glob(os.path.join(dataset.path_on_fast_store, "*.bin")))[0]
+        total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
+        if total_ims_files == int(total_btf_files / channels):
+            all_ims_files_open = dataset.check_tile_ims_files()
+            if all_ims_files_open:
+                dataset.update_processing_status("ims_converted")
+                log.info(f"Changed processing status to ims_converted for {dataset}")
+                montage_files = glob(os.path.join(imaris_folder, '*ontage.ims'))
+                if len(montage_files) > 0:
+                    try:
+                        ims_file = ims(montage_files[0])
+                        dataset.update_processing_status('finished')
+                        log.info(f"Changed processing status to finished for {dataset}")
+                        dataset.send_message('processing_finished')
+                        dataset.start_moving()
+                    except:
+                        print("Still building montage")
+
+    # check datasets where all tiles are converted to ims
+    records = cur.execute(
+        f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="ims_converted" AND paused=0'
+    ).fetchall()
+    for dataset_path in records:
+        try:
+            dataset = MesoSPIMDataset(dataset_path[0])
+        except:
+            print("WARNING: Invalid dataset at", dataset_path[0])
+            continue
+        if dataset.refractive_index:  # decon
+            decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
+            imaris_folder = os.path.join(decon_folder, 'ims_files')
+        else:  # no decon
+            imaris_folder = os.path.join(dataset.path_on_fast_store, 'ims_files')
+        montage_files = glob(os.path.join(imaris_folder, '*ontage.ims'))
+        if len(montage_files) > 0:
+            try:
+                ims_file = ims(montage_files[0])
+                dataset.update_processing_status('finished')
+                log.info(f"Changed processing status to finished for {dataset}")
+                dataset.send_message('processing_finished')
+                dataset.start_moving()
+            except:
+                print("Still building montage")
 
 
 def check_storage():

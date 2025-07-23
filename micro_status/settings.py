@@ -59,3 +59,4 @@ RESTRICT_MOVING_TIME = True
 MOVE_TIMES = {'start': 17, 'stop': 6}
 
 MESOSPIM_AUTO_STITCH_FOLDER = "/CBI_FastStore/tmp/stitch_jobs"
+NEW_DATASET_MARKER_FILENAME = ".microstatus.json"

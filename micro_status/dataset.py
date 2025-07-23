@@ -295,7 +295,7 @@ class Dataset:
         cur = con.cursor()
         processing_summary_str = cur.execute(f'SELECT processing_summary FROM dataset WHERE id={self.db_id}').fetchone()
         con.close()
-        if processing_summary_str and processing_summary_str[0] is not None:
+        if processing_summary_str and processing_summary_str[0]:
             processing_summary = json.loads(processing_summary_str[0])
         return processing_summary
 
@@ -311,18 +311,18 @@ class Dataset:
         con.commit()
         con.close()
 
-    def mark_has_processing_progress(self):
-        self.update_db_field('paused', 0)
-        self.update_db_field('processing_status', 'in_progress')
-        con = sqlite3.connect(DB_LOCATION)
-        cur = con.cursor()
-        res = cur.execute(f'UPDATE dataset SET processing_no_progress_time = null WHERE id={self.db_id}')
-        con.commit()
-        con.close()
-
-        self.processing_no_progress_time = None
-        self.paused = False
-        self.processing_status = "in_progress"
+    # def mark_has_processing_progress(self):
+    #     self.update_db_field('paused', 0)
+    #     self.update_db_field('processing_status', 'in_progress')
+    #     con = sqlite3.connect(DB_LOCATION)
+    #     cur = con.cursor()
+    #     res = cur.execute(f'UPDATE dataset SET processing_no_progress_time = null WHERE id={self.db_id}')
+    #     con.commit()
+    #     con.close()
+    #
+    #     self.processing_no_progress_time = None
+    #     self.paused = False
+    #     self.processing_status = "in_progress"
 
     def mark_no_processing_progress(self):
         progress_stopped_at = datetime.now().strftime(DATETIME_FORMAT)

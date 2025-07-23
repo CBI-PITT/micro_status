@@ -38,8 +38,6 @@ class RSCMDataset(Dataset):
             self.update_db_field('ribbons_total', self.ribbons_total)
 
     def _specific_setup(self, **kwargs):
-        print("In specific setup")
-
         with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
             data = f.read()
 
@@ -88,9 +86,7 @@ class RSCMDataset(Dataset):
             color_dirs = [x.path for x in os.scandir(subdir.path) if x.is_dir()]
             color_dirs = [x.split('/')[-1] for x in color_dirs]
             channels.update(color_dirs)
-        print("Colors", channels)
         channels = len(channels)
-        print("Channels", channels)
         return channels
 
     def get_ribbons_total(self):
@@ -159,7 +155,6 @@ class RSCMDataset(Dataset):
         has_progress = ribbons_finished > ribbons_finished_prev
 
         if CHECKING_TIFFS_ENABLED and self.imaging_status == "in_progress":
-            print("self.z_layers_checked", self.z_layers_checked)
             if finished:  # only check layer 0 (last layer)
                 z_start = 0
                 z_stop = -1
@@ -584,6 +579,18 @@ class RSCMDataset(Dataset):
         if self.check_imaris_file_built():
             status = "finished"
         return status
+
+    def mark_has_processing_progress(self):
+        self.update_db_field('paused', 0)
+        self.update_db_field('processing_status', 'started')
+        con = sqlite3.connect(DB_LOCATION)
+        cur = con.cursor()
+        res = cur.execute(f'UPDATE dataset SET processing_no_progress_time = null WHERE id={self.db_id}')
+        con.commit()
+        con.close()
+        self.processing_no_progress_time = None
+        self.paused = False
+        self.processing_status = "started"
 
 
 class Found(BaseException):
