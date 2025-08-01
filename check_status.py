@@ -109,59 +109,6 @@ def check_if_new(file_path):
     return file_path not in records
 
 
-# def read_dataset_record(file_path):
-#     con = sqlite3.connect(DB_LOCATION)
-#     cur = con.cursor()
-#     record = cur.execute(f'SELECT * FROM dataset WHERE path_on_fast_store="{str(file_path)}"').fetchone()
-#     con.close()
-#
-#     if not record:
-#         print("WARNING: broken/partial dataset", file_path)
-#         return
-#
-#     # print("Record", record)
-#
-#     pi_id = record[4]
-#     con = sqlite3.connect(DB_LOCATION)
-#     cur = con.cursor()
-#     pi_name = cur.execute(f'SELECT name FROM pi WHERE id="{pi_id}"').fetchone()
-#     con.close()
-#     if pi_name:
-#         pi_name = pi_name[0]
-#
-#     cl_number_id = record[3]
-#     con = sqlite3.connect(DB_LOCATION)
-#     cur = con.cursor()
-#     cl_number = cur.execute(f'SELECT name FROM clnumber WHERE id="{cl_number_id}"').fetchone()
-#     con.close()
-#     if cl_number:
-#         cl_number = cl_number[0]
-#
-#     dataset = Dataset(
-#         db_id = record[0],
-#         name = record[1],
-#         path_on_fast_store = record[2],
-#         cl_number = cl_number,
-#         pi = pi_name,
-#         imaging_status = record[5],
-#         processing_status = record[6],
-#
-#         channels = record[10],
-#         # z_layers_total = record[11],
-#         # z_layers_current = record[12],
-#         # ribbons_total = record[13],
-#         # ribbons_finished = record[14],
-#         imaging_no_progress_time = record[21],
-#         processing_no_progress_time = record[22],
-#         # z_layers_checked = record[19],
-#         # keep_composites = record[20],
-#         # delete_405 = record[21],
-#         # is_brain=record[22],
-#         # peace_json_created=record[23]
-#     )
-#     return dataset
-
-
 def check_RSCM_imaging():
     print("\n ================ Checking RSCM Imaging ==============\n")
     # Discover all vs_series.dat files in the acquisition directory
@@ -217,7 +164,7 @@ def check_RSCM_imaging():
                 # print("Imaging status is 'in-progress'")
                 got_finished, has_progress, error_flag = dataset.check_imaging_progress()
                 if error_flag:
-                    dataset.mark_paused()
+                    dataset.mark_imaging_paused()
                     dataset.send_message('broken_tiff_file')
                     continue
                 # print("Imaging finished:", got_finished)
@@ -241,15 +188,15 @@ def check_RSCM_imaging():
                     else:
                         progress_stopped_at = datetime.strptime(dataset.imaging_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                            dataset.mark_paused()
+                            dataset.mark_imaging_paused()
                             dataset.send_message('imaging_paused')
             elif dataset.imaging_status == 'needs_attention':
                 finished, has_progress, error_flag = dataset.check_imaging_progress()  # maybe imaging resumed
                 if not has_progress:
                     continue
                 else:
-                    dataset.mark_has_imaging_progress()
-                    dataset.mark_resumed()
+                    # dataset.mark_has_imaging_progress()
+                    dataset.mark_imaging_resumed()
                     # response = dataset.send_message('imaging_resumed')
                     # print(response)
 
@@ -312,7 +259,7 @@ def check_mesoSPIM_imaging():
             dataset.update_processing_status('in_progress')
             dataset.send_message('processing_started')
         elif dataset.imaging_status == "needs_attention":
-            pass  # TODO check status again
+            dataset.check_imaging_progress()
 
 
 def get_total_MesoSPIM_tiles(settings_bin_file):
@@ -804,7 +751,7 @@ def check_mesoSPIM_processing():
             else:
                 print("processing still in progress")
         else:
-            dataset.mark_paused()
+            dataset.mark_processing_paused()
             dataset.update_processing_status('needs_attention')
 
     # check datasets where decon is done

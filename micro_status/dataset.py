@@ -233,7 +233,7 @@ class Dataset:
         con.close()
         self.imaging_no_progress_time = progress_stopped_at
 
-    def mark_paused(self):
+    def mark_imaging_paused(self):
         self.update_db_field("imaging_status", "needs_attention")
         self.update_db_field("paused", 1)
         self.imaging_status = "needs_attention"
@@ -247,21 +247,14 @@ class Dataset:
         con.close()
         self.imaging_no_progress_time = None
 
-    def mark_resumed(self):
-        # con = sqlite3.connect(DB_LOCATION)
-        # cur = con.cursor()
-        # res = cur.execute(f'UPDATE dataset SET imaging_status = "in_progress" WHERE id={self.db_id}')
-        # con.commit()
-        # con.close()
+    def mark_imaging_resumed(self):
         self.update_db_field("imaging_status", "in_progress")
+        self.update_db_field("paused", 0)
         self.imaging_status = "in_progress"
+        self.paused = False
+        self.mark_has_imaging_progress()
 
     def mark_imaging_finished(self):
-        # con = sqlite3.connect(DB_LOCATION)
-        # cur = con.cursor()
-        # res = cur.execute(f'UPDATE dataset SET imaging_status = "finished" WHERE id={self.db_id}')
-        # con.commit()
-        # con.close()
         self.update_db_field("imaging_status", "finished")
         self.imaging_status = "finished"
 
@@ -333,36 +326,6 @@ class Dataset:
         con.commit()
         con.close()
         self.processing_no_progress_time = progress_stopped_at
-
-
-    # @property
-    # def imsqueue_file_name(self):
-    #     return f"job_{self.job_number}.txt.imsqueue"
-
-    # def check_ims_converter_works(self):
-    #     currently_building = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', '*.imsqueue'))
-    #     if len(currently_building):
-    #         currently_building = currently_building[0]
-    #     else:
-    #         return False
-    #     with open(currently_building, 'r') as f:
-    #         content = f.readlines()
-    #         if len(content) and len(content[0].split('"')):
-    #             ims_dir = content[0].split('"')[1]
-    #             ims_path = os.path.join(ims_dir, f"composites_RSCM_v0.1_{ims_dir.split(os.path.sep)[-1]}.ims.part")
-    #             processing_summary = self.get_processing_summary()
-    #             previous_ims_size = processing_summary.get('building_ims', {}).get('other_ims_size', 0)
-    #             current_ims_size = os.path.getsize(ims_path)
-    #             has_progress = current_ims_size != previous_ims_size  # Not just > because other file could have started building
-    #             if has_progress:
-    #                 value_from_db = processing_summary.get('building_ims')
-    #                 if value_from_db:
-    #                     value_from_db.update({'other_ims_size': current_ims_size})
-    #                     self.update_processing_summary({'building_ims': value_from_db})
-    #                 else:
-    #                     self.update_processing_summary({'building_ims': {'other_ims_size': current_ims_size}})
-    #             return has_progress
-    #     return False
 
     def check_imaris_file_built(self):
         file_opens = False
@@ -486,6 +449,12 @@ class Dataset:
                 self.update_db_field('path_on_hive', path_on_hive)
                 self.path_on_hive = path_on_hive
                 self.send_message('moved')
+
+    def mark_processing_paused(self):
+        self.update_db_field("processing_status", "needs_attention")
+        self.update_db_field("paused", 1)
+        self.processing_status = "needs_attention"
+        self.paused = True
 
 
 class Found(BaseException):

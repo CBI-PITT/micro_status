@@ -178,7 +178,6 @@ class RSCMDataset(Dataset):
         """
         file_path = Path(self.path_on_fast_store)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_txt_file_name)
-        # txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', self.rscm_txt_file_name)
         contents = f'rootDir="{str(file_path)}"\nkeepComposites=True\nmoveToHive=False'
         with open(txt_file_path, "w") as f:
             f.write(contents)
@@ -592,6 +591,34 @@ class RSCMDataset(Dataset):
         self.paused = False
         self.processing_status = "started"
 
+    # @property
+    # def imsqueue_file_name(self):
+    #     return f"job_{self.job_number}.txt.imsqueue"
+
+    # def check_ims_converter_works(self):
+    #     currently_building = glob(os.path.join(RSCM_FOLDER_BUILDING_IMS, 'processing', '*.imsqueue'))
+    #     if len(currently_building):
+    #         currently_building = currently_building[0]
+    #     else:
+    #         return False
+    #     with open(currently_building, 'r') as f:
+    #         content = f.readlines()
+    #         if len(content) and len(content[0].split('"')):
+    #             ims_dir = content[0].split('"')[1]
+    #             ims_path = os.path.join(ims_dir, f"composites_RSCM_v0.1_{ims_dir.split(os.path.sep)[-1]}.ims.part")
+    #             processing_summary = self.get_processing_summary()
+    #             previous_ims_size = processing_summary.get('building_ims', {}).get('other_ims_size', 0)
+    #             current_ims_size = os.path.getsize(ims_path)
+    #             has_progress = current_ims_size != previous_ims_size  # Not just > because other file could have started building
+    #             if has_progress:
+    #                 value_from_db = processing_summary.get('building_ims')
+    #                 if value_from_db:
+    #                     value_from_db.update({'other_ims_size': current_ims_size})
+    #                     self.update_processing_summary({'building_ims': value_from_db})
+    #                 else:
+    #                     self.update_processing_summary({'building_ims': {'other_ims_size': current_ims_size}})
+    #             return has_progress
+    #     return False
 
 class Found(BaseException):
     pass

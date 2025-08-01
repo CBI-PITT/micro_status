@@ -67,34 +67,27 @@ class MesoSPIMDataset(Dataset):
 
     def check_imaging_progress(self):
         if self.tiles_total:
-            print("self.tiles_total", self.tiles_total)
             files = sorted(glob(os.path.join(self.path_on_fast_store, "*.btf")))
             tiles_imaged = len(files)
-            print('tiles_imaged', tiles_imaged)
             tile_sizes = [os.path.getsize(x) for x in files]
-            print("tile_sizes", set(tile_sizes))
-            if tiles_imaged >= self.tiles_total:
-                print("All tiles are there!")
-                if len(set(tile_sizes)) == 1:  # imaging finished
+            if tiles_imaged >= self.tiles_total:  # all tiles are there
+                if len(set(tile_sizes)) == 1:  # all tiles are the same size -> imaging finished
                     self.mark_imaging_finished()
                     self.send_message('imaging_finished')
                     self.start_processing()
                     self.update_processing_status('in_progress')
                     self.send_message('processing_started')
-            else:
-                print("Imaging still in progress")
+            else:  # not all tiles are there
                 tiles_imaged_prev = self.tiles_finished
-                print("self.tiles_finished", self.tiles_finished)
                 smallest_file_size = min(tile_sizes)
-                print("smallest_file_size", smallest_file_size)
-                if tiles_imaged != tiles_imaged_prev:  # has progress
+                if tiles_imaged != tiles_imaged_prev:  # number of tiles has changed -> has progress
                     self.update_db_field('tiles_finished', tiles_imaged)
                     self.tiles_finished = tiles_imaged
-                else:
+                    self.mark_imaging_resumed()
+                else:  # number of tiles hasn't changed
                     imaging_summary = json.loads(self.imaging_summary) if self.imaging_summary else {}
                     smallest_file_size_prev = imaging_summary.get('smallest_file_size', 0)
-                    print("smallest_file_size_prev", smallest_file_size_prev)
-                    if smallest_file_size_prev != smallest_file_size:  # has progress
+                    if smallest_file_size_prev != smallest_file_size:  # smallest file has changed -> has progress
                         imaging_summary['smallest_file_size'] = smallest_file_size
                         imaging_summary_str = json.dumps(imaging_summary)
                         # self.update_db_field('imaging_summary', imaging_summary_str)
@@ -104,13 +97,14 @@ class MesoSPIMDataset(Dataset):
                         con.commit()
                         con.close()
                         self.imaging_summary = imaging_summary_str
+                        self.mark_imaging_resumed()
                     else:  # has no progress
-                        if self.imaging_no_progress_time:
+                        if self.imaging_no_progress_time:  # already had no progress during the last check
                             progress_stopped_at = datetime.strptime(self.imaging_no_progress_time, DATETIME_FORMAT)
                             if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                                self.mark_paused()
+                                self.mark_imaging_paused()
                                 # self.send_message('imaging_paused')
-                                print("CHECK IMAGING! May be paused")
+                                print(self, "CHECK IMAGING! May be paused")
                         else:
                             self.mark_no_imaging_progress()
 
