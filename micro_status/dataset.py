@@ -80,13 +80,14 @@ class Dataset:
         self.moved = record[32]
         self.moving = record[33]
         self.paused = record[34]
+        self.public = record[35]
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
 
     @classmethod
     def create(cls, file_path):
-        file_path = Path(file_path)   # TODO remove RSCM_FASTSTORE_ACQUISITION_FOLDER from the path
+        file_path = Path(file_path)
         path_parts = file_path.parts
         last_name_pattern = r"^[A-Za-z '-_]+$"
         pi_name = path_parts[4] if re.findall(last_name_pattern, path_parts[4]) else None  # TODO make it more general
@@ -129,7 +130,7 @@ class Dataset:
 
         dataset_name = path_parts[-1]
 
-        print("Path", file_path, "pi_name", pi_name, "cl_number", cl_number, "dataset_name", dataset_name)
+        log.info(f"Path {file_path}, PI name {pi_name}, CL number {cl_number}, Dataset Name {dataset_name}")
 
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
@@ -170,7 +171,6 @@ class Dataset:
         raise NotImplementedError("Subclasses must implement this method")
 
     def update_db_field(self, field_name, field_value):
-        print(">>>>>>>>>>>>>>>updating DB field", field_name, "to", field_value)
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET {field_name} = "{field_value}" WHERE id={self.db_id}')
@@ -196,14 +196,16 @@ class Dataset:
             'ignoring_demo_dataset': "Ignoring demo dataset {} {} {}",
             'requeue_ims': "Requeuing ims build task for {} {} {}",
             'peace_json_created': "Created analysis task for brain dataset {} {} {}",
-            'moved': "Dataset {} {} {} has been moved to h20"
+            'moved': "Dataset {} {} {} has been moved to h20",
+            'cant_make_public': "Dataset {} {} {} could NOT be moved to Public"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)
         elif msg_type == 'built_ims':
-            imaris_file_path = self.full_path_to_imaris_file
+            self.imaris_file_path = self.full_path_to_imaris_file
+            self.update_db_field('imaris_file_path', self.full_path_to_imaris_file)
             # ims_folder = str(PureWindowsPath(str(Path(imaris_file_path).parent).replace('/CBI_Hive', 'H:')))
-            ims_folder = str(PureWindowsPath(str(Path(imaris_file_path).parent).replace('/h20', 'H:').replace('/CBI_FastStore', 'Z:')))
+            ims_folder = str(PureWindowsPath(str(Path(self.imaris_file_path).parent).replace('/h20', 'H:').replace('/CBI_FastStore', 'Z:')))
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
@@ -294,9 +296,7 @@ class Dataset:
 
     def update_processing_summary(self, to_update):
         processing_summary = self.get_processing_summary()
-        print("processing_summary before:", processing_summary)
         processing_summary.update(to_update)
-        print("processing_summary after", processing_summary)
         processing_summary_str = json.dumps(processing_summary)
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
@@ -345,15 +345,13 @@ class Dataset:
         file name: {dataset_id}_{pi_name}_{cl_number}_{dataset_name}_move.txt
         this way the earlier datasets go in first
         """
-        print("Starting to move")
         dat_file_path = Path(self.path_on_fast_store)
         # txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_move_txt_file_name)
         txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', self.rscm_move_txt_file_name)
         contents = f'rootDir="{str(dat_file_path)}"\nIMS=False\ndenoise=False\nmoveOnly=True'
         with open(txt_file_path, "w") as f:
             f.write(contents)
-        log.info("-----------------------Queue moving to Hive. Text file : ---------------------")
-        log.info(contents)
+        log.info(f"Queue moving to Hive Text file for {self.path_on_fast_store}")
         self.moving = True
         self.update_db_field('moving', 1)
 
@@ -438,17 +436,25 @@ class Dataset:
     def check_if_moved(self):
         moved = os.path.exists(os.path.join(RSCM_FOLDER_STITCHING, 'complete', self.rscm_move_txt_file_name))
         if moved:
-            self.update_db_field('moved', 1)
-            self.moved = True
-            self.update_db_field('moving', 0)
-            self.moving = False
-            self.update_db_field('paused', 0)
-            self.paused = False
             path_on_hive = self.path_on_fast_store.replace(FASTSTORE_ACQUISITION_FOLDER, HIVE_ACQUISITION_FOLDER)
             if os.path.exists(path_on_hive):
                 self.update_db_field('path_on_hive', path_on_hive)
                 self.path_on_hive = path_on_hive
-                self.send_message('moved')
+                print(">>>>>>>>>>>>>>>path_to_ims_file_on_hive", self.path_to_ims_file_on_hive)
+                if self.path_to_ims_file_on_hive and os.path.exists(self.path_to_ims_file_on_hive):
+                    try:
+                        f = ims(self.path_to_ims_file_on_hive)
+                    except:
+                        pass
+                    else:
+                        self.update_db_field('moved', 1)
+                        self.moved = True
+                        self.update_db_field('moving', 0)
+                        self.moving = False
+                        self.update_db_field('paused', 0)
+                        self.paused = False
+                        self.send_message('moved')
+                        self.move_from_acquire_to_public()
 
     def mark_processing_paused(self):
         self.update_db_field("processing_status", "needs_attention")
@@ -456,6 +462,67 @@ class Dataset:
         self.processing_status = "needs_attention"
         self.paused = True
 
+    @property
+    def path_to_ims_file_on_hive(self):
+        ims_file = None
+        print(">>>>>>>>>>>>>>>>>>>>>>>>>self.imaris_file_path", self.imaris_file_path)
+        if self.imaris_file_path and self.path_on_hive:
+            ims_file = self.imaris_file_path.replace(FASTSTORE_ACQUISITION_FOLDER, HIVE_ACQUISITION_FOLDER)
+        return ims_file
+
+    @property
+    def path_to_ims_file_on_public_hive(self):
+        """
+        If None returned, it means it's impossible to move the dataset
+        """
+        ims_file = None
+        pi_pattern = r"^[a-z'-_]+-[a-z]$"
+        matches_pattern = re.findall(pi_pattern, self.pi)
+        print(">>>>>>>>>>>>>>>>>>>>matches_pattern", matches_pattern)
+        # check that the PI name matches the xxxxxx-x pattern and PI directory exists
+        print(">>>>>>>>>>>>>>>>>>>>os.path.exists(pi_folder)", os.path.exists(os.path.join('/h20/Public', self.pi)))
+        if matches_pattern and os.path.exists(os.path.join('/h20/Public', self.pi)) and self.imaris_file_path:
+            ims_file = os.path.join('/h20/Public', self.pi, self.cl_number, self.name, os.path.basename(self.imaris_file_path))
+        return ims_file
+
+    def move_from_acquire_to_public(self):
+        print(">>>>>>>>>>>>>>>>> move_from_acquire_to_public")
+        print("path_to_ims_file_on_hive", self.path_to_ims_file_on_hive)
+        print("path_to_ims_file_on_public_hive", self.path_to_ims_file_on_public_hive)
+        failure_flag = False
+        # check that ims file is on hive
+        if self.path_to_ims_file_on_hive and os.path.exists(self.path_to_ims_file_on_hive):
+            try:
+                # check that it opens (copying finished)
+                f = ims(self.path_to_ims_file_on_hive)
+            except:
+                failure_flag = True
+            else:
+                # check that destination file doesn't exist
+                if self.path_to_ims_file_on_public_hive and not os.path.exists(self.path_to_ims_file_on_public_hive):
+                    try:
+                        if not os.path.exists(os.path.dirname(self.path_to_ims_file_on_public_hive)):
+                            os.makedirs(os.path.dirname(self.path_to_ims_file_on_public_hive))
+                        # shutil.move(self.path_to_ims_file_on_hive, self.path_to_ims_file_on_public_hive)
+                        cmd = ['mv', self.path_to_ims_file_on_hive, self.path_to_ims_file_on_public_hive]
+                        subprocess.run(cmd)
+                    except:
+                        failure_flag = True
+                    else:
+                        try:
+                            f = ims(self.path_to_ims_file_on_public_hive)
+                        except:
+                            failure_flag = True
+                        # create a note with where it was moved
+                        with open(os.path.join(os.path.dirname(self.path_to_ims_file_on_hive), 'imaris_file_moved_to_public.txt'), 'w') as f:
+                            f.write(self.path_to_ims_file_on_public_hive)
+                else:
+                    failure_flag = True
+        else:
+            failure_flag = True
+        # if something went wrong, send message
+        if failure_flag:
+            self.send_message('cant_make_public')
 
 class Found(BaseException):
     pass

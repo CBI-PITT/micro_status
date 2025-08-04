@@ -10,6 +10,7 @@ from glob import glob
 from pathlib import Path
 
 from bs4 import BeautifulSoup
+import tifffile
 
 from .dataset import Dataset
 from .settings import *
@@ -44,11 +45,13 @@ class RSCMDataset(Dataset):
         soup = BeautifulSoup(data, "xml")
         z_layers = int(soup.find('stack_slice_count').text)
         ribbons_in_z_layer = int(soup.find('grid_cols').text)
+        log.info(f"Z layers: {z_layers}, ribbons in one Z {ribbons_in_z_layer}")
 
         ribbons_finished = 0
         file_path = Path(self.path_on_fast_store)
         subdirs = os.scandir(file_path)
         self.channels = self.count_channels()
+        log.info(f"Channels: {self.channels}")
         for subdir in subdirs:
             if subdir.is_file() or 'layer' not in subdir.name:
                 continue
@@ -60,6 +63,7 @@ class RSCMDataset(Dataset):
                 if ribbons < ribbons_in_z_layer:
                     break
         ribbons_total = z_layers * self.channels * ribbons_in_z_layer
+        log.info(f"Total ribbons: {self.ribbons_total}")
 
         # update database record
         con = sqlite3.connect(DB_LOCATION)
@@ -109,7 +113,7 @@ class RSCMDataset(Dataset):
     def check_imaging_progress(self):
         error_flag = False
         file_path = Path(self.path_on_fast_store)
-        ribbons_finished = 0  # TODO: optimize, start with current z layer, not mrom 0
+        ribbons_finished = 0  # TODO: optimize, start with current z layer, not from 0
         subdirs = sorted(glob(os.path.join(file_path, '*')), reverse=True)
         subdirs = [x for x in subdirs if os.path.isdir(x) and 'layer' in x]
         if len(subdirs) > 1000:
@@ -132,7 +136,6 @@ class RSCMDataset(Dataset):
             pass
         finally:
             z_layers_current = re.findall(r"\d+", os.path.basename(subdir))[-1]
-        print("current imaging z layer :", z_layers_current)
 
         finished = ribbons_finished >= self.ribbons_total
 
@@ -155,13 +158,13 @@ class RSCMDataset(Dataset):
         has_progress = ribbons_finished > ribbons_finished_prev
 
         if CHECKING_TIFFS_ENABLED and self.imaging_status == "in_progress":
-            if finished:  # only check layer 0 (last layer)
-                z_start = 0
-                z_stop = -1
-            else:
-                z_start = int((self.z_layers_checked - 1) if self.z_layers_checked is not None else self.z_layers_total)
-                # z_start = int((self.z_layers_checked or self.z_layers_total) - 1)
-                z_stop = int(z_layers_current)
+            # if finished:  # only check layer 0 (last layer)
+            #     z_start = 0
+            #     z_stop = -1
+            # else:
+            z_start = int((self.z_layers_checked - 1) if self.z_layers_checked is not None else self.z_layers_total)
+            # z_start = int((self.z_layers_checked or self.z_layers_total) - 1)
+            z_stop = int(z_layers_current)
 
             time.sleep(10)  # wait, in case if last image is still being saved
             bad_layer = self.check_tiffs(z_start, z_stop)
@@ -181,19 +184,17 @@ class RSCMDataset(Dataset):
         contents = f'rootDir="{str(file_path)}"\nkeepComposites=True\nmoveToHive=False'
         with open(txt_file_path, "w") as f:
             f.write(contents)
-        log.info("-----------------------Queue processing. Text file : ---------------------")
-        log.info(contents)
+        log.info(f"Queued processing text file for {self.path_on_fast_store}")
 
     def build_imaris_file(self):
         import subprocess
-        print("Starting imaris build command")
+        log.info(f"Starting imaris build command for {self.path_on_fast_store}")
         cmd = [
             '/h20/home/lab/miniconda3/envs/make_ims/bin/python',
             '/h20/home/lab/scripts/makeIMS_slurm_wine.py',
             self.job_dir,
             'true'
         ]
-        print(cmd)
         subprocess.run(cmd)
 
     @property
@@ -209,8 +210,7 @@ class RSCMDataset(Dataset):
         return f"{str(self.db_id).zfill(5)}_{self.pi}_{self.cl_number}_{self.name}.txt"
 
     def clean_up_raw_composites(self):
-        log.info("---------------------Cleaning up raw composites--------------------")
-        log.info(f"composites_dir: {self.composites_dir}")
+        log.info(f"Cleaning up raw composites at {self.composites_dir}")
         if not self.composites_dir:
             return
         raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
@@ -223,13 +223,11 @@ class RSCMDataset(Dataset):
         if not os.path.exists(trash_folder_raw):
             os.makedirs(trash_folder_raw)
         for f in raw_composites:
-            log.info(f"move to trash: {f}")
             trash_path = os.path.join(trash_folder_raw, os.path.basename(f))
             shutil.move(f, trash_path)
 
     def clean_up_denoised_composites(self):
-        log.info("---------------------Cleaning up denoised composites--------------------")
-        log.info(f"job_dir: {self.job_dir}")
+        log.info(f"Cleaning up denoised composites at {self.job_dir}")
         if not self.job_dir:
             return
         denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
@@ -242,7 +240,6 @@ class RSCMDataset(Dataset):
         if not os.path.exists(trash_folder_denoised):
             os.makedirs(trash_folder_denoised)
         for f in denoised_composites:
-            log.info(f"move to trash: {f}")
             trash_path = os.path.join(trash_folder_denoised, os.path.basename(f))
             shutil.move(f, trash_path)
 
@@ -284,7 +281,6 @@ class RSCMDataset(Dataset):
             processing_summary = self.get_processing_summary()
             workers_previous = processing_summary.get('stitching', {})
             has_progress = workers != workers_previous
-            print("---------------------------stitching has progress", has_progress)
             if has_progress:
                 self.update_processing_summary({"stitching": workers})
         return has_progress
@@ -312,19 +308,14 @@ class RSCMDataset(Dataset):
         :param z_stop:
         :return:
         """
-        print("--------------------checking tiff files-----------------")
-        print("z start", z_start, "z stop", z_stop)
         for z in range(z_start, z_stop, -1):
-            print("checking layer", z)
             layer_dir = os.path.join(
-                str(Path(self.path_on_fast_store).parent),
+                self.path_on_fast_store,
                 f'{self.name.split("_stack")[0]}_layer{str(z).zfill(3) if z < 1000 else str(z)}'
             )
             colors = glob(os.path.join(layer_dir, '[0-9]' * 3))
-
             for cc in colors:
                 images = glob(os.path.join(cc, 'images', '*col*.tif'))
-                print("Images:", len(images))
 
                 for image in images:
                     try:
@@ -339,6 +330,7 @@ class RSCMDataset(Dataset):
                 f'UPDATE dataset SET z_layers_checked = {z} WHERE id={self.db_id}')
             con.commit()
             con.close()
+        return None
 
     @property
     def composites_dir(self):
@@ -439,9 +431,7 @@ class RSCMDataset(Dataset):
 
     def check_all_raw_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
-        print('expected raw composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.composites_dir, 'composite*.tif')))
-        print('actual raw composites', actual_composites)
         return expected_composites >= actual_composites
 
     def check_all_raw_composites_same_size(self):
@@ -453,9 +443,7 @@ class RSCMDataset(Dataset):
         if not self.job_dir:
             return False
         expected_composites = self.z_layers_total * self.channels
-        print('expected denoised composites', expected_composites)
         actual_composites = len(glob(os.path.join(self.job_dir, 'composite*.tif')))
-        print('actual denoised composites', actual_composites)
         return expected_composites == actual_composites
 
     def check_all_denoised_composites_same_size(self):
@@ -514,17 +502,15 @@ class RSCMDataset(Dataset):
         con.close()
 
     def check_ims_building_progress(self):
-        print("in check_ims_building_progress")
         processing_summary = self.get_processing_summary()
         previous_ims_size = processing_summary.get('building_ims', {}).get('ims_size', 0)
         partial_ims_file = self.full_path_to_ims_part_file
-        print("partial_ims_file", partial_ims_file)
         if not os.path.exists(partial_ims_file):
-            print("Partial ims file doesn't exist")
+            # Partial ims file doesn't exist
             has_progress = False
             current_ims_size = 0
         else:
-            print("Partial ims file exists")
+            # Partial ims file exists
             current_ims_size = os.path.getsize(partial_ims_file)
             has_progress = current_ims_size != previous_ims_size  # the file building could start over
             print("current_ims_size != previous_ims_size", has_progress)
@@ -581,7 +567,7 @@ class RSCMDataset(Dataset):
 
     def mark_has_processing_progress(self):
         self.update_db_field('paused', 0)
-        self.update_db_field('processing_status', 'started')
+        self.update_db_field('processing_status', 'in_progress')
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
         res = cur.execute(f'UPDATE dataset SET processing_no_progress_time = null WHERE id={self.db_id}')
@@ -589,7 +575,7 @@ class RSCMDataset(Dataset):
         con.close()
         self.processing_no_progress_time = None
         self.paused = False
-        self.processing_status = "started"
+        self.processing_status = "in_progress"
 
     # @property
     # def imsqueue_file_name(self):

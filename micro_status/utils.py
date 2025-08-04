@@ -14,7 +14,6 @@ def can_be_moved():
     # print("local_time_str", local_time_str)
 
     week_day = datetime.today().weekday()
-    print("week_day", week_day)
     if week_day == 5 or week_day == 6:
         return True
 
@@ -25,7 +24,6 @@ def can_be_moved():
     local_timezone = pytz.timezone('America/New_York')
     # Convert UTC time to local time
     local_time = current_time_utc.astimezone(local_timezone)
-    print("local_time.hour", local_time.hour)
     if local_time.hour >= MOVE_TIMES['start'] or local_time.hour <= MOVE_TIMES['stop']:
         return True
     return False

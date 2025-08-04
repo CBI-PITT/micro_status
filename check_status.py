@@ -81,7 +81,7 @@ from micro_status.warning import Warning
 from micro_status.utils import can_be_moved
 
 
-console_handler = logging.StreamHandler()
+# console_handler = logging.StreamHandler()
 LOG_FILE_NAME_PATTERN = "/CBI_FastStore/Iana/bot_logs/{}_{}.txt"
 file_handler = logging.FileHandler(
     LOG_FILE_NAME_PATTERN.format(
@@ -92,7 +92,8 @@ file_handler = logging.FileHandler(
 logging.basicConfig(
     level=logging.INFO,
     format='%(name)s - %(levelname)s - %(message)s',
-    handlers=[console_handler, file_handler]
+    handlers=[file_handler]
+    # handlers=[console_handler, file_handler]
 )
 log = logging.getLogger(__name__)
 
@@ -123,19 +124,20 @@ def check_RSCM_imaging():
     print("\tUnique RSCM datasets found: ", len(datasets))
 
     for file_path in datasets:
-        # print("Working on: ", file_path)
+        print("\t\t- ", file_path)
         is_new = check_if_new(file_path)
         new_dataset_marker_json = os.path.join(file_path, NEW_DATASET_MARKER_FILENAME)
         if is_new:
-            log.info(f"\t--- New RSCM dataset at {file_path} ---")
+            log.info(f"New RSCM dataset at {file_path}")
             # check whether it's an existing dataset that got renamed
             if os.path.exists(new_dataset_marker_json):
-                print("\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
+                print("\t\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
                 # read .microstatus.json file in the root folder of the dataset
                 old_path_data = json.load(open(new_dataset_marker_json, 'r'))
                 old_path = old_path_data['path']
                 dataset = RSCMDataset(old_path)
                 dataset.update_db_field('path_on_fast_store', file_path)
+                log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
                 dataset.path_on_fast_store = file_path
             else:
                 dataset = RSCMDataset.create(file_path)
@@ -145,7 +147,7 @@ def check_RSCM_imaging():
                 if "demo" in dataset.name.lower():
                     # demo dataset
                     log.info(f"Ignoring demo dataset {dataset}")
-                    print(f"Ignoring demo dataset {dataset}")
+                    print(f"\t\t\tIgnoring demo dataset {dataset}")
                     dataset.send_message('ignoring_demo_dataset')
                     dataset.mark_imaging_finished()
                     dataset.update_processing_status('finished')
@@ -154,6 +156,7 @@ def check_RSCM_imaging():
                 dataset.send_message('imaging_started')
         else:
             dataset = RSCMDataset(file_path)
+            print("\t\t\t", dataset.imaging_status)
             # Create .microstatus.json file in the root folder of the dataset if it doesn't exist
             # This is for old datasets. Can be removed after all old datasets get moved to h20
             if not os.path.exists(new_dataset_marker_json):
@@ -165,19 +168,19 @@ def check_RSCM_imaging():
                 got_finished, has_progress, error_flag = dataset.check_imaging_progress()
                 if error_flag:
                     dataset.mark_imaging_paused()
+                    log.info(f"Updated imaging status to paused for {file_path}")
                     dataset.send_message('broken_tiff_file')
                     continue
-                # print("Imaging finished:", got_finished)
                 if got_finished:
                     dataset.mark_imaging_finished()
+                    log.info(f"Updated imaging status to finished for {file_path}")
                     dataset.send_message('imaging_finished')
                     if dataset.delete_405:
-                        print("------------Deleting 405 channel")
+                        log.info(f"Deleting 405 channel for {dataset}")
                         dataset.delete_channel_405()
                     if '_cont_' not in dataset.name.lower():
                         dataset.start_processing()
                     continue
-                # print("Imaging has progress:", has_progress)
                 if has_progress:
                     if dataset.imaging_no_progress_time:
                         dataset.mark_has_imaging_progress()
@@ -189,6 +192,7 @@ def check_RSCM_imaging():
                         progress_stopped_at = datetime.strptime(dataset.imaging_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                             dataset.mark_imaging_paused()
+                            log.info(f"Updated imaging status to paused for {file_path}")
                             dataset.send_message('imaging_paused')
             elif dataset.imaging_status == 'needs_attention':
                 finished, has_progress, error_flag = dataset.check_imaging_progress()  # maybe imaging resumed
@@ -197,8 +201,7 @@ def check_RSCM_imaging():
                 else:
                     # dataset.mark_has_imaging_progress()
                     dataset.mark_imaging_resumed()
-                    # response = dataset.send_message('imaging_resumed')
-                    # print(response)
+                    log.info(f"Updated imaging status to in_progress for {file_path}")
 
 
 def check_mesoSPIM_imaging():
@@ -214,17 +217,19 @@ def check_mesoSPIM_imaging():
     print("\tUnique MesoSPIM datasets found: ", len(datasets))
 
     for file_path in list(datasets):
+        print("\t\t- ", file_path)
         is_new = check_if_new(file_path)
         new_dataset_marker_json = os.path.join(file_path, NEW_DATASET_MARKER_FILENAME)
         if is_new:
-            log.info(f"\t--- New mesoSPIM dataset at {file_path} ---")
+            log.info(f"New mesoSPIM dataset at {file_path}")
             if os.path.exists(new_dataset_marker_json):
-                print("\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
+                print("\t\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
                 # # read .microstatus.json file in the root folder of the dataset
                 old_path_data = json.load(open(new_dataset_marker_json, 'r'))
                 old_path = old_path_data['path']
                 dataset = MesoSPIMDataset(old_path)
                 dataset.update_db_field('path_on_fast_store', file_path)
+                log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
                 dataset.path_on_fast_store = file_path
             else:
                 dataset = MesoSPIMDataset.create(file_path)
@@ -243,6 +248,7 @@ def check_mesoSPIM_imaging():
                 dataset.send_message('imaging_started')
 
         dataset = MesoSPIMDataset(file_path)
+        print("\t\t\t", dataset.imaging_status)
         if not os.path.exists(new_dataset_marker_json):
             path_data = {"path": file_path}
             json.dump(path_data, open(new_dataset_marker_json, "w"))
@@ -257,6 +263,7 @@ def check_mesoSPIM_imaging():
         elif dataset.imaging_status == "finished" and dataset.processing_status == "not_started":
             dataset.start_processing()
             dataset.update_processing_status('in_progress')
+            log.info(f"Updated processing status to in_progress for {file_path}")
             dataset.send_message('processing_started')
         elif dataset.imaging_status == "needs_attention":
             dataset.check_imaging_progress()
@@ -331,6 +338,7 @@ def job_in_queue(user, job_name):
 
 
 def check_RSCM_processing():
+    print("\n ================ Checking RSCM processing ===============")
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
@@ -343,20 +351,17 @@ def check_RSCM_processing():
             script_name = '/h20/home/lab/scripts/run_rscm_cluster.sh'
             result = subprocess.run([script_name], text=True, capture_output=True)
             log.info(result.stdout)
-            # listen_script = "/h20/home/lab/scripts/run_RSCM_stitch_listen.sh"
-            # result = subprocess.run(['sbatch', listen_script], text=True, capture_output=True)
-            # log.info(result.stdout)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
     for dataset_path in records:
-        print('dataset_path', dataset_path[0])
+        print("\t\t-", dataset_path[0])
         dataset = RSCMDataset(dataset_path[0])
         if dataset.check_being_stitched():
             dataset.update_processing_status('started')
+            log.info(f"Updated processing status to started for {dataset_path[0]}")
             dataset.send_message('processing_started')
 
     # =========================  check stitching  ============================
-    print("=========================  check stitching  ============================")
+    print("\n\t===== check stitching")
 
     records_not_started = cur.execute(
         f'SELECT path_on_fast_store FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
@@ -365,35 +370,36 @@ def check_RSCM_processing():
         'SELECT path_on_fast_store FROM dataset WHERE processing_status="started" AND modality="rscm"'
     ).fetchall()
     if not records_not_started and not records_started:  # nothing is being stitched. dask cluster can be stopped
-        records_moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moving=1 AND moved=0').fetchall()
-        if not records_moving:
-            log.info("!!!!!!!!!!!!!!!!! Stopping RSCM cluster !!!!!!!!!!!!!!!!!!")
-            # list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being moved
-            # list_and_kill_jobs('lab', "DASK_WORKER")
-            # list_and_kill_jobs('lab', "RSCM_Listen")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        records_moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE processing_status="finished" AND moving=1 AND moved=0').fetchall()
+        if not records_moving and job_in_queue('lab', 'DASK_SCHED'):
+            if not len(glob("/CBI_FastStore/clusterStitchTEST/processing/*.txt")) and not len(glob("/CBI_FastStore/clusterStitchTEST/queueStitch/*.txt")) and not len(glob("/CBI_FastStore/clusterStitchTEST/tempQueue/*.txt")):
+                log.info("!!!!!!!!!!!!!!!!! Stopping RSCM cluster !!!!!!!!!!!!!!!!!!")
+                list_and_kill_jobs('lab', "DASK_SCHED")  # TODO check that nothing is being moved
+                list_and_kill_jobs('lab', "DASK_WORKER")
+                list_and_kill_jobs('lab', "RSCM_Listen")
 
-    print("\nDataset instances where stitching started:")
     for dataset_path in records_started:
-        print("-----", dataset_path)
+        print("\t\t-", dataset_path[0])
         dataset = RSCMDataset(dataset_path[0])
         if dataset.check_stitching_complete():
-            print("File in complete dir")
+            # print("File in complete dir")
             # path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
             # if os.path.exists(path_on_hive):  # copying started
             if dataset.check_all_raw_composites_present() and dataset.check_all_raw_composites_same_size():
-                print("All composites present and same size")
+                # print("All composites present and same size")
                 dataset.update_processing_status('stitched')
-            else:
-                print("All composites present: ", dataset.check_all_raw_composites_present())
-                print("All composites same size: ", dataset.check_all_raw_composites_same_size())
+                log.info(f"Updated processing status to stitched for {dataset_path[0]}")
+            # else:
+                # print("All composites present: ", dataset.check_all_raw_composites_present())
+                # print("All composites same size: ", dataset.check_all_raw_composites_same_size())
         elif dataset.check_stitching_errored():
-            print("File in error dir")
+            # File in error dir
             dataset.update_processing_status('needs_attention')
             dataset.update_db_field('paused', '1')
+            log.info(f"Updated processing status to needs_attention for {dataset_path[0]}")
             dataset.send_message('stitching_error')
         elif dataset.check_being_stitched():
-            print("File in processing dir")
+            # File in processing dir
             has_progress = dataset.check_stitching_progress()
             if has_progress:
                 if dataset.processing_no_progress_time:
@@ -405,22 +411,22 @@ def check_RSCM_processing():
                 else:
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                        # dataset.update_processing_status('paused')
+                        dataset.update_processing_status('needs_attention')
                         dataset.update_db_field('paused', '1')
+                        log.info(f"Updated processing status to needs_attention for {dataset_path[0]}")
                         dataset.send_message('stitching_stuck')
-        else:
-            print("File in none of ClusterStitchTest dirs")
 
         if dataset.job_dir:
             if dataset.check_imaris_file_built():
                 dataset.update_db_field('processing_status', 'finished')
+                log.info(f"Updated processing status to finished for {dataset_path[0]}")
                 dataset.send_message('built_ims')
                 if not dataset.keep_composites:
                     dataset.clean_up_denoised_composites()
                 dataset.start_moving()
 
     # ====================  check denoising =====================
-    print("====================  check denoising =====================")
+    print("\n\t=====  check denoising")
 
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE processing_status="stitched" AND modality="rscm" and paused=0'
@@ -430,27 +436,25 @@ def check_RSCM_processing():
             log.info("!!!!!!!!!!!!!!!!! Launching CBPY !!!!!!!!!!!!!!!!!!")
             script_name = '/h20/home/lab/scripts/run_cbpy.sh'
             result = subprocess.run(["sbatch", script_name], text=True, capture_output=True)
-            log.info(result.stdout)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     else:
-        log.info("!!!!!!!!!!!!!!!!! Stopping CBPY !!!!!!!!!!!!!!!!!!")
-        # list_and_kill_jobs('lab', "CBPy")  # TODO check that nothing is being processed
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        if job_in_queue('lab', 'CBPy'):
+            if not len(glob("/CBI_FastStore/clusterPy/active/*.xml")) and not len(glob("/CBI_FastStore/clusterPy/queueGPU/*.xml")):
+                log.info("!!!!!!!!!!!!!!!!! Stopping CBPY !!!!!!!!!!!!!!!!!!")
+                list_and_kill_jobs('lab', "CBPy")
 
-    print("\nDatasets that have been STITCHED:")
     for dataset_path in records:
-        print("-----", dataset_path)
+        print("\t\t-", dataset_path[0])
         dataset = RSCMDataset(dataset_path[0])
         if dataset.job_dir:
-            print("Job dir is there")
+            # print("Job dir is there")
             job_number = re.findall(r"\d+", os.path.basename(dataset.job_dir))[-1]
             dataset.update_job_number(job_number)
             denoising_started = len(glob(os.path.join(dataset.job_dir, "composite*.tif"))) > 0
-            print("Denoising started:", denoising_started)
+            # print("Denoising started:", denoising_started)
             if not denoising_started:
                 # TODO: check the # of queued files == number of composites ?
                 in_queue = len(glob(os.path.join(CBPY_FOLDER, 'queueGPU', f"job_{dataset.job_number}*"))) > 0
-                print("In queue:", in_queue)
+                # print("In queue:", in_queue)
                 if in_queue:
                     if dataset.processing_no_progress_time:
                         dataset.mark_has_processing_progress()
@@ -463,10 +467,11 @@ def check_RSCM_processing():
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                             dataset.update_processing_status('needs_attention')
                             dataset.update_db_field('paused', 1)
+                            log.info(f"Updated processing status to needs_attention for {dataset_path[0]}")
                             dataset.send_message('denoising_stuck')
                 # check that something else is being denoised and making progress
                 cbpy_works = dataset.check_cbpy_works()
-                print("CBPY works:", cbpy_works)
+                # print("CBPY works:", cbpy_works)
                 if cbpy_works:
                     if dataset.processing_no_progress_time:
                         dataset.mark_has_processing_progress()
@@ -478,19 +483,20 @@ def check_RSCM_processing():
                         progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                         if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                             dataset.update_processing_status('needs_attention')
+                            log.info(f"Updated processing status to needs_attention for {dataset_path[0]}")
                             dataset.send_message('denoising_stuck')
                 continue
 
             denoising_finished = dataset.check_denoising_finished()
-            print('denoising_finished', denoising_finished)
+            # print('denoising_finished', denoising_finished)
             if denoising_finished:
                 dataset.update_processing_status('denoised')
+                log.info(f"Updated processing status to denoised for {dataset_path[0]}")
                 dataset.clean_up_raw_composites()
                 dataset.build_imaris_file()
-                # dataset.start_moving()
                 continue
             denoising_has_progress = dataset.check_denoising_progress()
-            print('denoising_has_progress', denoising_has_progress)
+            # print('denoising_has_progress', denoising_has_progress)
             if denoising_has_progress:
                 if dataset.processing_no_progress_time:
                     dataset.mark_has_processing_progress()
@@ -502,20 +508,20 @@ def check_RSCM_processing():
                     progress_stopped_at = datetime.strptime(dataset.processing_no_progress_time, DATETIME_FORMAT)
                     if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                         dataset.update_processing_status('needs_attention')
+                        log.info(f"Updated processing status to needs_attention for {dataset_path[0]}")
                         dataset.send_message('denoising_stuck')
 
     # ===================== check building imaris file ========================
-    print("===================== check building imaris file ========================")
+    print("\n\t=====  check building imaris file")
 
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE processing_status="denoised" AND modality="rscm" and paused=0'
     ).fetchall()
-    print("\nDatasets that have been DENOISED:")
     for dataset_path in records:
-        print("-----", dataset_path)
+        print("\t\t-", dataset_path)
         dataset = RSCMDataset(dataset_path[0])
         if os.path.exists(dataset.full_path_to_imaris_file):
-            print("Imaris file exists")
+            # print("Imaris file exists")
             try:
                 # try to open imaris file
                 ims_file = ims(dataset.full_path_to_imaris_file)
@@ -541,7 +547,7 @@ def check_RSCM_processing():
                 dataset.start_moving()
         elif os.path.exists(dataset.full_path_to_ims_part_file):
             # Building of ims file in-progress
-            print("Building Imaris file in-progress")
+            # print("Building Imaris file in-progress")
             ims_has_progress = dataset.check_ims_building_progress()
             if ims_has_progress:
                 if dataset.processing_no_progress_time:
@@ -591,7 +597,7 @@ def check_RSCM_processing():
 
     # Eventually datasets should be on hive
     # ===================== check moving ========================
-    print("===================== check moving ========================")
+    print("\n\t=====  check moving")
 
     records = cur.execute(
         'SELECT path_on_fast_store FROM dataset WHERE modality = "rscm" AND processing_status="finished" AND moved=0'
@@ -605,11 +611,10 @@ def check_RSCM_processing():
             # listen_script = "/h20/home/lab/scripts/run_RSCM_stitch_listen.sh"
             # result = subprocess.run(['sbatch', listen_script], text=True, capture_output=True)
             # log.info(result.stdout)
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-    print("\nDatasets that should be moved:")
+    # print("\nDatasets that should be moved:")
     for dataset_path in records:
-        print("-----", dataset_path)
+        print("\t\t-", dataset_path)
         dataset = RSCMDataset(dataset_path[0])
         path_on_hive = os.path.join(HIVE_ACQUISITION_FOLDER, dataset.pi, dataset.cl_number, dataset.name)
         if os.path.exists(os.path.join(path_on_hive, 'vs_series.dat')):
@@ -630,16 +635,15 @@ def check_RSCM_processing():
                 dataset.send_message("processing_finished")
 
     # ==================== Handle 'paused' processing status ==================
-    print("===================== check paused datasets ========================")
+    print("\n\t=====  check paused datasets")
     records = cur.execute(
-        'SELECT path_on_fast_store FROM dataset WHERE modality="rscm" and paused=1'
+        'SELECT path_on_fast_store FROM dataset WHERE modality="rscm" and imaging_status="finished" and paused=1'
     ).fetchall()
-    print("\nDatasets that are in paused status:")
     for dataset_path in records:
-        print("-----", dataset_path)
+        print("\t\t-", dataset_path)
         dataset = RSCMDataset(dataset_path[0])
         guessed_processing_status = dataset.guess_processing_status()
-        print("guessed_processing_status:", guessed_processing_status)
+        # print("guessed_processing_status:", guessed_processing_status)
         progress_methods_map = {
             "started": dataset.check_stitching_progress,
             "stitched": dataset.check_denoising_progress,
@@ -647,31 +651,31 @@ def check_RSCM_processing():
             # "built_ims": dataset.check_finalization_progress
         }
         has_progress = progress_methods_map[guessed_processing_status]()
-        print("has progress", has_progress)
+        # print("has progress", has_progress)
         if has_progress:
             dataset.mark_has_processing_progress()
             dataset.update_processing_status(guessed_processing_status)
-        print("guessed_processing_status", guessed_processing_status)
-        print("dataset.job_dir", dataset.job_dir)
+        # print("guessed_processing_status", guessed_processing_status)
+        # print("dataset.job_dir", dataset.job_dir)
         # print("os.path.exists(dataset.job_dir)", os.path.exists(dataset.job_dir))
         if guessed_processing_status == "finished" and dataset.job_dir and dataset.job_dir.startswith('/CBI_FastStore') and os.path.exists(dataset.job_dir):
             dataset.start_moving()
 
 
 def check_moving():
-    print("Checking MesoSPIM moving")
+    print("\n ================ Checking moving ===============")
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
         f'SELECT path_on_fast_store FROM dataset WHERE processing_status="finished" AND moved=0'
     ).fetchall()
     for dataset_path in records:
-        print('dataset_path', dataset_path[0])
+        print("\t-", dataset_path[0])
         if dataset_path[0].startswith(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
             try:
                 dataset = MesoSPIMDataset(dataset_path[0])
             except:
-                print("WARNING: Invalid dataset at", dataset_path[0])
+                print("\t\tWARNING: Invalid dataset at", dataset_path[0])
                 continue
         elif dataset_path[0].startswith(RSCM_FASTSTORE_ACQUISITION_FOLDER):
             dataset = RSCMDataset(dataset_path[0])
@@ -688,7 +692,7 @@ def check_moving():
 
 
 def check_mesoSPIM_processing():
-    print("Checking MesoSPIM processing")
+    print("\n ================ Checking MesoSPIM processing ===============\n")
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     # datasets where either decon or imaris conversion has started
@@ -699,17 +703,16 @@ def check_mesoSPIM_processing():
         f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="in_progress" AND paused=0'
     ).fetchall()
     for dataset_path in records:
-        print('dataset_path', dataset_path[0])
+        print('\t-', dataset_path[0])
         try:
             dataset = MesoSPIMDataset(dataset_path[0])
         except:
-            print("WARNING: Invalid dataset at", dataset_path[0])
+            print("\t\tWARNING: Invalid dataset at", dataset_path[0])
             continue
         settings_bin_file = sorted(glob(os.path.join(dataset.path_on_fast_store, "*.bin")))
         if len(settings_bin_file):
             settings_bin_file = settings_bin_file[0]
             total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
-            print(">>>>>>>>>>>>>>>>dataset.refractive_index", dataset.refractive_index)
             if dataset.refractive_index:  # decon will be done
                 decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
                 imaris_folder = os.path.join(decon_folder, 'ims_files')
@@ -718,7 +721,6 @@ def check_mesoSPIM_processing():
                 if len(decon_tif_files) == total_btf_files:
                     # check all tiff files are the same size
                     tif_sizes = [os.path.getsize(os.path.join(decon_folder, x)) for x in decon_tif_files]
-                    print("decon tif sizes", set(tif_sizes))
                     if len(set(tif_sizes)) == 1:
                         # decon finished
                         dataset.update_processing_status("decon_done")
@@ -739,17 +741,17 @@ def check_mesoSPIM_processing():
                             ims_file = ims(montage_files[0])
                             dataset.update_processing_status('finished')
                             log.info(f"Changed processing status to finished for {dataset}")
-                            dataset.send_message('processing_finished')
+                            dataset.send_message('built_ims')
                             dataset.start_moving()
                         except:
-                            print("Still building montage")
+                            pass
                     else:
-                        print("Still stitching")
+                        print("\t\tstitching")
                         dataset.check_auto_stitch()
                 else:
-                    print("Found broken ims files")
+                    print("\t\tfound broken ims files")
             else:
-                print("processing still in progress")
+                print("\t\tstarted")
         else:
             dataset.mark_processing_paused()
             dataset.update_processing_status('needs_attention')
@@ -759,12 +761,13 @@ def check_mesoSPIM_processing():
         f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="decon_done" and paused=0'
     ).fetchall()
     for dataset_path in records:
-        print('dataset_path', dataset_path[0])
+        print('\t-', dataset_path[0])
         try:
             dataset = MesoSPIMDataset(dataset_path[0])
         except:
-            print("WARNING: Invalid dataset at", dataset_path[0])
+            print("\t\tWARNING: Invalid dataset at", dataset_path[0])
             continue
+        print("\t\tdecon done")
         decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
         imaris_folder = os.path.join(decon_folder, 'ims_files')
         ims_files = sorted(glob(os.path.join(imaris_folder, '*Tile*_Ch*_Sh*.ims')))
@@ -786,18 +789,20 @@ def check_mesoSPIM_processing():
                         dataset.send_message('processing_finished')
                         dataset.start_moving()
                     except:
-                        print("Still building montage")
+                        print("\t\tbuilding montage")
 
     # check datasets where all tiles are converted to ims
     records = cur.execute(
         f'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND processing_status="ims_converted" AND paused=0'
     ).fetchall()
     for dataset_path in records:
+        print('\t-', dataset_path[0])
         try:
             dataset = MesoSPIMDataset(dataset_path[0])
         except:
-            print("WARNING: Invalid dataset at", dataset_path[0])
+            print("\t\tWARNING: Invalid dataset at", dataset_path[0])
             continue
+        print("\t\tims converted")
         if dataset.refractive_index:  # decon
             decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
             imaris_folder = os.path.join(decon_folder, 'ims_files')
@@ -812,7 +817,7 @@ def check_mesoSPIM_processing():
                 dataset.send_message('processing_finished')
                 dataset.start_moving()
             except:
-                print("Still building montage")
+                print("\t\tbuilding montage")
 
 
 def check_storage():
@@ -890,13 +895,11 @@ def check_storage():
 
 
 def move_files():
-    print("Can data be moved now? ", can_be_moved())
     if can_be_moved():
         # move all files from tempQueue to QueueStitch
         files_in_temp_queue = sorted(glob(os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', '*move.txt')))
         for file in files_in_temp_queue:
             path_in_queue = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', os.path.basename(file))
-            print("moving", file, "to", path_in_queue)
             shutil.move(file, path_in_queue)
     else:
         # move all files from QueueStitch to tempQueue
@@ -995,7 +998,6 @@ def summary_message():
     local_timezone = pytz.timezone('America/New_York')
     # Convert UTC time to local time
     local_time = current_time_utc.astimezone(local_timezone)
-    print("local_time.hour", local_time.hour)
     if local_time.hour >= 9:
         # update Warning table with active=1
         conn = sqlite3.connect(DB_LOCATION)
@@ -1012,8 +1014,6 @@ def summary_message():
         # if daily_summary has message_sent=1: do nothing
         message_sent = int(row[0])
         active = int(row[1])
-        print("message_sent", message_sent)
-        print("active", active)
         # if daily_summary has message_sent=0 and active=1: send message
         if message_sent == 0 and active == 1:
             imaging, processing, paused = get_status_summary()

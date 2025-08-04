@@ -64,6 +64,9 @@ class MesoSPIMDataset(Dataset):
             )
             con.commit()
             con.close()
+            # log.info(f"Channels: {self.channels}, Tiles: {self.tiles_total}")
+        # log.info(f"Refractive index {self.refractive_index}")
+        # log.info(f"Resolution (XY) {self.resolution_xy}, resolution (Z) {self.resolution_z}")
 
     def check_imaging_progress(self):
         if self.tiles_total:
@@ -73,9 +76,11 @@ class MesoSPIMDataset(Dataset):
             if tiles_imaged >= self.tiles_total:  # all tiles are there
                 if len(set(tile_sizes)) == 1:  # all tiles are the same size -> imaging finished
                     self.mark_imaging_finished()
+                    log.info(f"Updated imaging status to finished for {self.path_on_fast_store}")
                     self.send_message('imaging_finished')
                     self.start_processing()
                     self.update_processing_status('in_progress')
+                    log.info(f"Updated processing status to in_progress for {self.path_on_fast_store}")
                     self.send_message('processing_started')
             else:  # not all tiles are there
                 tiles_imaged_prev = self.tiles_finished
@@ -84,6 +89,7 @@ class MesoSPIMDataset(Dataset):
                     self.update_db_field('tiles_finished', tiles_imaged)
                     self.tiles_finished = tiles_imaged
                     self.mark_imaging_resumed()
+                    log.info(f"Updated imaging status to in_progress for {self.path_on_fast_store}")
                 else:  # number of tiles hasn't changed
                     imaging_summary = json.loads(self.imaging_summary) if self.imaging_summary else {}
                     smallest_file_size_prev = imaging_summary.get('smallest_file_size', 0)
@@ -98,13 +104,14 @@ class MesoSPIMDataset(Dataset):
                         con.close()
                         self.imaging_summary = imaging_summary_str
                         self.mark_imaging_resumed()
+                        log.info(f"Updated imaging status to in_progress for {self.path_on_fast_store}")
                     else:  # has no progress
                         if self.imaging_no_progress_time:  # already had no progress during the last check
                             progress_stopped_at = datetime.strptime(self.imaging_no_progress_time, DATETIME_FORMAT)
                             if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
                                 self.mark_imaging_paused()
-                                # self.send_message('imaging_paused')
-                                print(self, "CHECK IMAGING! May be paused")
+                                log.info(f"Updated imaging status to paused for {self.path_on_fast_store}")
+                                self.send_message('imaging_paused')
                         else:
                             self.mark_no_imaging_progress()
 
@@ -117,6 +124,7 @@ class MesoSPIMDataset(Dataset):
             acquisition_list = pickle.load(f)
             total_btf_files = len(acquisition_list)
             return total_btf_files
+        return None
 
     def get_total_MesoSPIM_colors_from_bin_file(self):
         # print("Counting color channels")
@@ -128,6 +136,7 @@ class MesoSPIMDataset(Dataset):
             lasers = [x['laser'] for x in acquisition_list]
             total_colors = len(set(lasers))
             return total_colors
+        return None
 
     def get_total_MesoSPIM_colors_from_file_list(self):
         btf_files = [x for x in os.listdir(self.path_on_fast_store) if x.endswith(".btf")]
@@ -150,6 +159,7 @@ class MesoSPIMDataset(Dataset):
         #     str(self.resolution_xy),
         #     str(self.resolution_xy)
         # ]
+        log.info(f"Queuing processing for {self.path_on_fast_store}")
         cmd = [
             '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
             '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
@@ -182,7 +192,6 @@ class MesoSPIMDataset(Dataset):
             stitching_json_file_name = os.path.basename(json_files[0])
             stitching_json_file_error = os.path.join(MESOSPIM_AUTO_STITCH_FOLDER, 'error', stitching_json_file_name)
             if os.path.exists(stitching_json_file_error):
-                print("Stitching error!!!!!!!!!!!!!!!!!!")
                 processing_summary = self.get_processing_summary()
                 value_from_db = processing_summary.get('stitching', {})
                 if value_from_db:
@@ -203,3 +212,15 @@ class MesoSPIMDataset(Dataset):
                     if already_in_error_folder:
                         value_from_db.update({'stitching': {'already_in_error_folder': False}})
                         self.update_processing_summary(value_from_db)
+
+    @property
+    def full_path_to_imaris_file(self):
+        ims_file = None
+        if self.refractive_index:
+            imaris_folder = os.path.join(self.path_on_fast_store, 'decon', 'ims_files')
+        else:
+            imaris_folder = os.path.join(self.path_on_fast_store, 'ims_files')
+        candidates = glob(os.path.join(imaris_folder, "*.ontage.ims"))
+        if len(candidates):
+            ims_file = candidates[0]
+        return ims_file
