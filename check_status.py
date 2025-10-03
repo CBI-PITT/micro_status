@@ -367,7 +367,7 @@ def check_RSCM_processing():
         f'SELECT path_on_fast_store FROM dataset WHERE processing_status="not_started" AND imaging_status="finished" AND modality="rscm"'
     ).fetchall()
     records_started = cur.execute(
-        'SELECT path_on_fast_store FROM dataset WHERE processing_status="started" AND modality="rscm"'
+        'SELECT path_on_fast_store FROM dataset WHERE modality="rscm" AND (processing_status="started" OR processing_status="in_progress")'
     ).fetchall()
     if not records_not_started and not records_started:  # nothing is being stitched. dask cluster can be stopped
         records_moving = cur.execute('SELECT path_on_fast_store FROM dataset WHERE processing_status="finished" AND moving=1 AND moved=0').fetchall()
@@ -440,7 +440,7 @@ def check_RSCM_processing():
         if job_in_queue('lab', 'CBPy'):
             if not len(glob("/CBI_FastStore/clusterPy/active/*.xml")) and not len(glob("/CBI_FastStore/clusterPy/queueGPU/*.xml")):
                 log.info("!!!!!!!!!!!!!!!!! Stopping CBPY !!!!!!!!!!!!!!!!!!")
-                list_and_kill_jobs('lab', "CBPy")
+                # list_and_kill_jobs('lab', "CBPy")
 
     for dataset_path in records:
         print("\t\t-", dataset_path[0])
@@ -716,15 +716,16 @@ def check_mesoSPIM_processing():
             if dataset.refractive_index:  # decon will be done
                 decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
                 imaris_folder = os.path.join(decon_folder, 'ims_files')
-                decon_tif_files = os.listdir(decon_folder)
-                decon_tif_files = [x for x in decon_tif_files if x.endswith('.tif') and not x.startswith('psf_')]
-                if len(decon_tif_files) == total_btf_files:
-                    # check all tiff files are the same size
-                    tif_sizes = [os.path.getsize(os.path.join(decon_folder, x)) for x in decon_tif_files]
-                    if len(set(tif_sizes)) == 1:
-                        # decon finished
-                        dataset.update_processing_status("decon_done")
-                        log.info(f"Changed processing status to decon_done for {dataset}")
+                if os.path.exists(decon_folder):
+                    decon_tif_files = os.listdir(decon_folder)
+                    decon_tif_files = [x for x in decon_tif_files if x.endswith('.tif') and not x.startswith('psf_')]
+                    if len(decon_tif_files) == total_btf_files:
+                        # check all tiff files are the same size
+                        tif_sizes = [os.path.getsize(os.path.join(decon_folder, x)) for x in decon_tif_files]
+                        if len(set(tif_sizes)) == 1:
+                            # decon finished
+                            dataset.update_processing_status("decon_done")
+                            log.info(f"Changed processing status to decon_done for {dataset}")
             else:  # no decon
                 imaris_folder = os.path.join(dataset.path_on_fast_store, 'ims_files')
             ims_files = sorted(glob(os.path.join(imaris_folder, '*Tile*_Ch*_Sh*.ims')))

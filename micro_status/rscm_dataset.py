@@ -37,6 +37,13 @@ class RSCMDataset(Dataset):
             pass
         if self.ribbons_total != ribbons_total_bak:
             self.update_db_field('ribbons_total', self.ribbons_total)
+        z_layers_bak = self.z_layers_total
+        try:
+            self.z_layers_total = self.count_z_layers()
+        except:
+            pass
+        if z_layers_bak != self.z_layers_total:
+            self.update_db_field('z_layers_total', self.z_layers_total)
 
     def _specific_setup(self, **kwargs):
         with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
@@ -79,6 +86,14 @@ class RSCMDataset(Dataset):
         self.ribbons_total = ribbons_total
         self.z_layers_current = z_layers - 1
         self.ribbons_finished = 0
+
+    def count_z_layers(self):
+        with open(os.path.join(self.path_on_fast_store, 'vs_series.dat'), 'r') as f:
+            data = f.read()
+
+        soup = BeautifulSoup(data, "xml")
+        z_layers = int(soup.find('stack_slice_count').text)
+        return z_layers
 
     def count_channels(self):
         file_path = Path(self.path_on_fast_store)
@@ -215,7 +230,7 @@ class RSCMDataset(Dataset):
             return
         raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
         log.info(f"raw_composites: {len(raw_composites)}")
-        if self.full_path_to_imaris_file.startswith('/CBI_FastStore'):
+        if self.composites_dir.startswith('/CBI_FastStore'):
             trash_location = FASTSTORE_TRASH_LOCATION
         else:
             trash_location = HIVE_TRASH_LOCATION
@@ -343,7 +358,7 @@ class RSCMDataset(Dataset):
         if os.path.exists(composites_dir):
             return composites_dir
         if data_location == RSCM_FASTSTORE_ACQUISITION_FOLDER:
-            data_location = HIVE_ACQUISITION_FOLDER
+            data_location = RSCM_HIVE_ACQUISITION_FOLDER
         else:
             data_location = RSCM_FASTSTORE_ACQUISITION_FOLDER
         raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
@@ -362,7 +377,7 @@ class RSCMDataset(Dataset):
             final_job_dir = job_dirs[-1]
         else: # TODO: rewrite this terrible piece
             if data_location == RSCM_FASTSTORE_ACQUISITION_FOLDER:
-                data_location = HIVE_ACQUISITION_FOLDER
+                data_location = RSCM_HIVE_ACQUISITION_FOLDER
             else:
                 data_location = RSCM_FASTSTORE_ACQUISITION_FOLDER
             raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
@@ -432,7 +447,7 @@ class RSCMDataset(Dataset):
     def check_all_raw_composites_present(self):
         expected_composites = self.z_layers_total * self.channels
         actual_composites = len(glob(os.path.join(self.composites_dir, 'composite*.tif')))
-        return expected_composites >= actual_composites
+        return actual_composites >= expected_composites
 
     def check_all_raw_composites_same_size(self):
         files = sorted(glob(os.path.join(self.composites_dir, 'composite*.tif')))

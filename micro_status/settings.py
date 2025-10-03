@@ -21,7 +21,7 @@ SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL")
 SLACK_HEADERS = {'content-type': 'application/json', 'Accept-Charset': 'UTF-8', 'Authorization': f'Bearer {os.getenv("SLACK_TOKEN")}'}
-PROGRESS_TIMEOUT = 600  # seconds
+PROGRESS_TIMEOUT = 1200  # seconds
 RSCM_FOLDER_STITCHING = "/CBI_FastStore/clusterStitchTEST"
 RSCM_FOLDER_BUILDING_IMS = "/CBI_FastStore/clusterStitch"
 CBPY_FOLDER = "/CBI_FastStore/clusterPy"
@@ -41,7 +41,7 @@ WHERE_PROCESSING_HAPPENS = {
 }
 DATA_LOCATION = {
     'faststore': RSCM_FASTSTORE_ACQUISITION_FOLDER,
-    'hive': HIVE_ACQUISITION_FOLDER
+    'hive': RSCM_HIVE_ACQUISITION_FOLDER
 }
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 PEACE_JSON_FOLDER = "/h20/CBI/Iana/json"

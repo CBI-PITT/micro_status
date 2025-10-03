@@ -109,9 +109,10 @@ class MesoSPIMDataset(Dataset):
                         if self.imaging_no_progress_time:  # already had no progress during the last check
                             progress_stopped_at = datetime.strptime(self.imaging_no_progress_time, DATETIME_FORMAT)
                             if (datetime.now() - progress_stopped_at).total_seconds() > PROGRESS_TIMEOUT:
-                                self.mark_imaging_paused()
-                                log.info(f"Updated imaging status to paused for {self.path_on_fast_store}")
-                                self.send_message('imaging_paused')
+                                if self.imaging_status != "needs_attention":
+                                    self.mark_imaging_paused()
+                                    log.info(f"Updated imaging status to paused for {self.path_on_fast_store}")
+                                    self.send_message('imaging_paused')
                         else:
                             self.mark_no_imaging_progress()
 
