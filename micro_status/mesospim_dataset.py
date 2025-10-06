@@ -82,6 +82,7 @@ class MesoSPIMDataset(Dataset):
                     self.update_processing_status('in_progress')
                     log.info(f"Updated processing status to in_progress for {self.path_on_fast_store}")
                     self.send_message('processing_started')
+                    self.stitch_maxips()
             else:  # not all tiles are there
                 tiles_imaged_prev = self.tiles_finished
                 smallest_file_size = min(tile_sizes)
@@ -225,3 +226,51 @@ class MesoSPIMDataset(Dataset):
         if len(candidates):
             ims_file = candidates[0]
         return ims_file
+
+    @property
+    def grid_size(self):
+        rows = None
+        columns = None
+
+        metadata_files = sorted(glob(os.path.join(self.path, '*.btf_meta.txt')))
+        if len(metadata_files):
+            first_channel = re.findall(r"_Ch(\d+)_", os.path.basename(metadata_files[0]))
+            if len(first_channel):
+                first_channel = first_channel[0]
+                first_channel_metadata_files = [x for x in metadata_files if f'_Ch{first_channel}_' in os.path.basename(x)]
+                x_positions = []
+                y_positions = []
+                for file in first_channel_metadata_files:
+                    with open(file, 'r') as f:
+                        lines = f.readlines()
+                    x = [l for l in lines if "[x_pos]" in l][0]
+                    x_pos = re.findall(r"\d+\.\d+", x)[0]
+                    y = [l for l in lines if "[y_pos]" in l][0]
+                    y_pos = re.findall(r"\d+\.\d+", y)[0]
+                    x_positions.append(x_pos)
+                    y_positions.append(y_pos)
+                # Extract unique x_pos and y_pos values
+                x_positions = set(x_positions)
+                y_positions = set(y_positions)
+                # Calculate the grid size
+                rows = len(y_positions)
+                columns = len(x_positions)
+        return rows, columns
+
+    def stitch_maxips(self):
+        from pathlib import Path
+        rows, cols = self.grid_size
+        script_folder = Path(__file__).parent
+        cmd = [
+            '/h20/home/lab/miniconda3/envs/peace/bin/python',
+            str(script_folder / 'validate_tiles.py'),
+            f'{self.path}/MAX_*.btf.tiff',
+            '--rows', str(rows),
+            '--cols', str(cols),
+            '--order', 'col-major',
+            '--stage-direction-y', '1',
+            '--stage-direction-x', '1',
+            '--outdir', f'{self.path}/stitched_maxips'
+        ]
+        import subprocess
+        subprocess.run(cmd)
