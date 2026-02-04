@@ -353,7 +353,8 @@ class RSCMDataset(Dataset):
         At the time of building composites
         """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['build_composites']]
-        raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
+        # raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
+        raw_data_dir = self.path_on_fast_store.replace(RSCM_FASTSTORE_ACQUISITION_FOLDER, data_location)
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
         if os.path.exists(composites_dir):
             return composites_dir
@@ -370,7 +371,8 @@ class RSCMDataset(Dataset):
         At the time of denoising
         """
         data_location = DATA_LOCATION[WHERE_PROCESSING_HAPPENS['denoise']]
-        raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
+        raw_data_dir = self.path_on_fast_store.replace(RSCM_FASTSTORE_ACQUISITION_FOLDER, data_location)
+        # raw_data_dir = os.path.join(data_location, self.pi, self.cl_number, self.name)
         composites_dir = os.path.join(raw_data_dir, 'composites_RSCM_v0.1')
         job_dirs = [f for f in sorted(glob(os.path.join(composites_dir, 'job_*'))) if os.path.isdir(f)]
         if len(job_dirs):

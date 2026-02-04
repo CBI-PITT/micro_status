@@ -25,26 +25,27 @@ class MesoSPIMDataset(Dataset):
             self.path = self.path_on_hive
         else:
             self.path = self.path_on_fast_store.replace('/CBI_FastStore', '/h20')
-        metadata_file = sorted(glob(os.path.join(self.path, '*.btf_meta.txt')))[0]
-        f = open(metadata_file, 'r')
-        lines = f.readlines()
-        xy = [l for l in lines if "[Pixelsize in um]" in l][0]
-        xy_res = re.findall(r"\d+", xy)[0]
-        self.resolution_xy = int(xy_res)
-        z = [l for l in lines if "[z_stepsize]" in l][0]
-        z_res = re.findall(r"\d+\.\d+", z)[0]
-        self.refractive_index = None
-        ri = [l for l in lines if "[ETL CFG File]" in l][0]
-        ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_", ri)
-        if len(ri_value):
-            self.refractive_index = float(ri_value[0])
-        self.resolution_z = int(float(z_res))
-        self.settings_bin_file = None
-        bin_files = sorted(glob(os.path.join(self.path, "*.bin")))
-        if len(bin_files):
-            self.settings_bin_file = bin_files[0]
-            self.channels = self.get_total_MesoSPIM_colors_from_bin_file()
-            self.tiles_total = self.get_total_MesoSPIM_tiles()
+        if os.path.exists(self.path) and len(glob(os.path.join(self.path, '*.btf_meta.txt'))):  # not renamed
+            metadata_file = sorted(glob(os.path.join(self.path, '*.btf_meta.txt')))[0]
+            f = open(metadata_file, 'r')
+            lines = f.readlines()
+            xy = [l for l in lines if "[Pixelsize in um]" in l][0]
+            xy_res = re.findall(r"\d+", xy)[0]
+            self.resolution_xy = int(xy_res)
+            z = [l for l in lines if "[z_stepsize]" in l][0]
+            z_res = re.findall(r"\d+\.\d+", z)[0]
+            self.refractive_index = None
+            ri = [l for l in lines if "[ETL CFG File]" in l][0]
+            ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_", ri)
+            if len(ri_value):
+                self.refractive_index = float(ri_value[0])
+            self.resolution_z = int(float(z_res))
+            self.settings_bin_file = None
+            bin_files = sorted(glob(os.path.join(self.path, "*.bin")))
+            if len(bin_files):
+                self.settings_bin_file = bin_files[0]
+                self.channels = self.get_total_MesoSPIM_colors_from_bin_file()
+                self.tiles_total = self.get_total_MesoSPIM_tiles()
 
     def _specific_setup(self, **kwargs):
         con = sqlite3.connect(DB_LOCATION)
