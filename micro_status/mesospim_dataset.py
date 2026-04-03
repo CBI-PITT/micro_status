@@ -1,11 +1,9 @@
 import json
 import logging
 import os
-import pickle
 import re
 import subprocess
 import sqlite3
-import sys
 from datetime import datetime
 from glob import glob
 
@@ -17,10 +15,10 @@ log = logging.getLogger(__name__)
 
 
 class MesoSPIMDataset(Dataset):
+    file_type = "btf"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.file_type = "btf"
-        self.tiles_total = None
         self.refractive_index = None
         if os.path.exists(self.path_on_fast_store):
             self.path = self.path_on_fast_store
@@ -28,26 +26,35 @@ class MesoSPIMDataset(Dataset):
             self.path = self.path_on_hive
         else:
             self.path = self.path_on_fast_store.replace('/CBI_FastStore', '/h20')
-        if os.path.exists(self.path) and len(glob(os.path.join(self.path, '*_meta.txt'))):  # not renamed
-            metadata_file = sorted(glob(os.path.join(self.path, '*_meta.txt')))[0]
-            f = open(metadata_file, 'r')
-            lines = f.readlines()
-            xy = [l for l in lines if "[Pixelsize in um]" in l][0]
-            xy_res = re.findall(r"\d+", xy)[0]
-            self.resolution_xy = int(xy_res)
-            z = [l for l in lines if "[z_stepsize]" in l][0]
-            z_res = re.findall(r"\d+\.\d+", z)[0]
-            ri = [l for l in lines if "[ETL CFG File]" in l][0]
-            ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_?", ri)
-            if len(ri_value):
-                self.refractive_index = float(ri_value[0])
-            self.resolution_z = int(float(z_res))
-            self.settings_bin_file = None
-            bin_files = sorted(glob(os.path.join(self.path, "*.bin")))
-            if len(bin_files):
-                self.settings_bin_file = bin_files[0]
-                self.channels = self.get_total_MesoSPIM_colors_from_bin_file()
-                self.tiles_total = self.get_total_MesoSPIM_tiles()
+
+        metadata_files = self.metadata_files
+        if metadata_files:
+            with open(metadata_files[0], 'r') as f:
+                lines = f.readlines()
+
+            xy = [l for l in lines if "[Pixelsize in um]" in l]
+            if xy:
+                xy_res = re.findall(r"\d+(?:\.\d+)?", xy[0])[0]
+                self.resolution_xy = int(float(xy_res))
+
+            z = [l for l in lines if "[z_stepsize]" in l]
+            if z:
+                z_res = re.findall(r"-?\d+(?:\.\d+)?", z[0])[0]
+                self.resolution_z = int(float(z_res))
+
+            ri = [l for l in lines if "[ETL CFG File]" in l]
+            if ri:
+                ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_?", ri[0])
+                if ri_value:
+                    self.refractive_index = float(ri_value[0])
+
+        channels = self.get_total_MesoSPIM_colors_from_file_list()
+        if channels:
+            self.channels = channels
+
+        tiles_total = self.get_total_MesoSPIM_tiles()
+        if tiles_total:
+            self.tiles_total = tiles_total
 
     def _specific_setup(self, **kwargs):
         con = sqlite3.connect(DB_LOCATION)
@@ -58,7 +65,7 @@ class MesoSPIMDataset(Dataset):
         con.commit()
         con.close()
 
-        if self.settings_bin_file:
+        if self.channels or self.tiles_total:
             # update database record
             con = sqlite3.connect(DB_LOCATION)
             cur = con.cursor()
@@ -73,7 +80,7 @@ class MesoSPIMDataset(Dataset):
 
     def check_imaging_progress(self):
         if self.tiles_total:
-            files = sorted(glob(os.path.join(self.path_on_fast_store, "*.btf")))
+            files = self.tile_files
             tiles_imaged = len(files)
             tile_sizes = [os.path.getsize(x) for x in files]
             if tiles_imaged >= self.tiles_total:  # all tiles are there
@@ -120,36 +127,48 @@ class MesoSPIMDataset(Dataset):
                         else:
                             self.mark_no_imaging_progress()
 
-    def get_total_MesoSPIM_tiles(self):
-        # print("Counting tiles")
-        if self.settings_bin_file:
-            sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
-            sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
-            f = open(self.settings_bin_file, 'rb')
-            acquisition_list = pickle.load(f)
-            total_btf_files = len(acquisition_list)
-            return total_btf_files
-        return None
+    @property
+    def tile_name_pattern(self):
+        return r'_Tile(\d+)_Ch([0-9]+[a-zA-Z]?)_'
 
-    def get_total_MesoSPIM_colors_from_bin_file(self):
-        # print("Counting color channels")
-        if self.settings_bin_file:
-            sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
-            sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
-            f = open(self.settings_bin_file, 'rb')
-            acquisition_list = pickle.load(f)
-            lasers = [x['laser'] for x in acquisition_list]
-            total_colors = len(set(lasers))
-            return total_colors
-        return None
+    @property
+    def tile_files(self):
+        if not os.path.exists(self.path_on_fast_store):
+            return []
+
+        tile_entries = []
+        for entry_name in os.listdir(self.path_on_fast_store):
+            entry_path = os.path.join(self.path_on_fast_store, entry_name)
+            if not re.search(self.tile_name_pattern, entry_name):
+                continue
+            if self.file_type == "btf" and os.path.isfile(entry_path) and entry_name.endswith('.btf'):
+                tile_entries.append(entry_path)
+        return sorted(tile_entries)
+
+    @property
+    def metadata_files(self):
+        metadata_patterns = [
+            os.path.join(self.path_on_fast_store, '*_meta.txt'),
+            os.path.join(os.path.dirname(self.path_on_fast_store), f'{self.name}_*_meta.txt'),
+        ]
+
+        metadata_files = []
+        for pattern in metadata_patterns:
+            metadata_files.extend(glob(pattern))
+
+        metadata_files = [x for x in metadata_files if re.search(self.tile_name_pattern, os.path.basename(x))]
+        return sorted(set(metadata_files))
+
+    def get_total_MesoSPIM_tiles(self):
+        return len(self.tile_files) or None
 
     def get_total_MesoSPIM_colors_from_file_list(self):
-        btf_files = [x for x in os.listdir(self.path_on_fast_store) if x.endswith(".btf")]
-        import re
-        pattern = r'_Ch([0-9]+[a-zA-Z]?)_'
-        channel_matches = [re.findall(pattern, x)[0] for x in btf_files]
-        channels = len(set(channel_matches))
-        return channels
+        channel_matches = []
+        for tile_file in self.tile_files:
+            match = re.search(self.tile_name_pattern, os.path.basename(tile_file))
+            if match:
+                channel_matches.append(match.group(2))
+        return len(set(channel_matches)) or None
 
     def start_processing(self):
         """
@@ -243,10 +262,9 @@ class MesoSPIMDataset(Dataset):
         rows = None
         columns = None
 
-        metadata_files = sorted(glob(os.path.join(self.path, f'*.{self.file_type}_meta.txt')))
-        print(">>>>>>>>>>>>>>>>>>>>>metadata_files", metadata_files)
+        metadata_files = self.metadata_files
         if len(metadata_files):
-            first_channel = re.findall(r"_Ch(\d+)_", os.path.basename(metadata_files[0]))
+            first_channel = re.findall(r"_Ch([0-9]+[a-zA-Z]?)_", os.path.basename(metadata_files[0]))
             if len(first_channel):
                 first_channel = first_channel[0]
                 first_channel_metadata_files = [x for x in metadata_files if f'_Ch{first_channel}_' in os.path.basename(x)]
@@ -255,12 +273,14 @@ class MesoSPIMDataset(Dataset):
                 for file in first_channel_metadata_files:
                     with open(file, 'r') as f:
                         lines = f.readlines()
-                    x = [l for l in lines if "[x_pos]" in l][0]
-                    x_pos = re.findall(r"\d+\.\d+", x)[0]
-                    y = [l for l in lines if "[y_pos]" in l][0]
-                    y_pos = re.findall(r"\d+\.\d+", y)[0]
-                    x_positions.append(x_pos)
-                    y_positions.append(y_pos)
+                    x = [l for l in lines if "[x_pos]" in l]
+                    y = [l for l in lines if "[y_pos]" in l]
+                    if not x or not y:
+                        continue
+                    x_pos = re.findall(r"-?\d+(?:\.\d+)?", x[0])[0]
+                    y_pos = re.findall(r"-?\d+(?:\.\d+)?", y[0])[0]
+                    x_positions.append(float(x_pos))
+                    y_positions.append(float(y_pos))
                 # Extract unique x_pos and y_pos values
                 x_positions = set(x_positions)
                 y_positions = set(y_positions)
@@ -291,9 +311,7 @@ class MesoSPIMDataset(Dataset):
 
 
 class MesoSPIMZarrDataset(MesoSPIMDataset):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.file_type = "ome.zarr"
+    file_type = "ome.zarr"
 
     def _specific_setup(self, **kwargs):
         super()._specific_setup(**kwargs)
@@ -339,3 +357,19 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
                     for f in ome_zarr_dirs:
                         shutil.move(f, os.path.join(trash_loc, os.path.basename(f)))
 
+    @property
+    def tile_files(self):
+        if not os.path.exists(self.path_on_fast_store):
+            return []
+
+        tile_entries = []
+        for entry_name in os.listdir(self.path_on_fast_store):
+            entry_path = os.path.join(self.path_on_fast_store, entry_name)
+            if self.file_type == "ome.zarr" and os.path.isdir(entry_path) and entry_name.endswith('.ome.zarr'):
+                for subentry_name in os.listdir(entry_path):
+                    subentry_path = os.path.join(entry_path, subentry_name)
+                    if not re.search(self.tile_name_pattern, subentry_name):
+                        continue
+                    if os.path.isdir(subentry_path) and subentry_name.endswith('.ome.zarr'):
+                        tile_entries.append(subentry_path)
+        return sorted(tile_entries)
