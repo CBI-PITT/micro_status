@@ -11,6 +11,7 @@ from glob import glob
 
 from .dataset import Dataset
 from .settings import *
+from .utils import backup_zarr_v2_metadata_to_zip
 
 log = logging.getLogger(__name__)
 
@@ -18,15 +19,17 @@ log = logging.getLogger(__name__)
 class MesoSPIMDataset(Dataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.file_type = "btf"
         self.tiles_total = None
+        self.refractive_index = None
         if os.path.exists(self.path_on_fast_store):
             self.path = self.path_on_fast_store
         elif self.path_on_hive and os.path.exists(self.path_on_hive):
             self.path = self.path_on_hive
         else:
             self.path = self.path_on_fast_store.replace('/CBI_FastStore', '/h20')
-        if os.path.exists(self.path) and len(glob(os.path.join(self.path, '*.btf_meta.txt'))):  # not renamed
-            metadata_file = sorted(glob(os.path.join(self.path, '*.btf_meta.txt')))[0]
+        if os.path.exists(self.path) and len(glob(os.path.join(self.path, '*_meta.txt'))):  # not renamed
+            metadata_file = sorted(glob(os.path.join(self.path, '*_meta.txt')))[0]
             f = open(metadata_file, 'r')
             lines = f.readlines()
             xy = [l for l in lines if "[Pixelsize in um]" in l][0]
@@ -34,9 +37,8 @@ class MesoSPIMDataset(Dataset):
             self.resolution_xy = int(xy_res)
             z = [l for l in lines if "[z_stepsize]" in l][0]
             z_res = re.findall(r"\d+\.\d+", z)[0]
-            self.refractive_index = None
             ri = [l for l in lines if "[ETL CFG File]" in l][0]
-            ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_", ri)
+            ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_?", ri)
             if len(ri_value):
                 self.refractive_index = float(ri_value[0])
             self.resolution_z = int(float(z_res))
@@ -163,11 +165,19 @@ class MesoSPIMDataset(Dataset):
         #     str(self.resolution_xy)
         # ]
         log.info(f"Queuing processing for {self.path_on_fast_store}")
+        # cmd = [
+        #     '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
+        #     '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
+        #     'automated-method-slurm',
+        #     self.path if ' ' not in self.path else f'"{self.path}"'
+        # ]
         cmd = [
-            '/h20/home/lab/miniconda3/envs/mesospim_utils/bin/python',
-            '/h20/home/lab/src/mesospim_utils/mesospim_utils/automated.py',
+            '/h20/home/lab/miniconda3/envs/mesospim_dev/bin/python',
+            '/h20/home/lab/src/mesospim_utils_v0.1/mesospim_utils/automated.py',
+            # '/h20/home/lab/src/mesospim_utils_zarr/mesospim_utils/mesospim_utils/automated.py',
             'automated-method-slurm',
-            self.path if ' ' not in self.path else f'"{self.path}"'
+            self.path if ' ' not in self.path else f'"{self.path}"',
+            '--final-file-type', 'ims'
         ]
         subprocess.run(cmd)
 
@@ -233,7 +243,8 @@ class MesoSPIMDataset(Dataset):
         rows = None
         columns = None
 
-        metadata_files = sorted(glob(os.path.join(self.path, '*.btf_meta.txt')))
+        metadata_files = sorted(glob(os.path.join(self.path, f'*.{self.file_type}_meta.txt')))
+        print(">>>>>>>>>>>>>>>>>>>>>metadata_files", metadata_files)
         if len(metadata_files):
             first_channel = re.findall(r"_Ch(\d+)_", os.path.basename(metadata_files[0]))
             if len(first_channel):
@@ -265,7 +276,7 @@ class MesoSPIMDataset(Dataset):
         cmd = [
             '/h20/home/lab/miniconda3/envs/peace/bin/python',
             str(script_folder / 'validate_tiles.py'),
-            f'{self.path}/MAX_*.btf.tiff',
+            f'{self.path}/MAX_*.ome.zarr.tif' if self.file_type == "ome.zarr" else f'{self.path}/MAX_*.btf.tiff',
             '--rows', str(rows),
             '--cols', str(cols),
             '--order', 'col-major',
@@ -275,3 +286,56 @@ class MesoSPIMDataset(Dataset):
         ]
         import subprocess
         subprocess.run(cmd)
+
+
+
+
+class MesoSPIMZarrDataset(MesoSPIMDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.file_type = "ome.zarr"
+
+    def _specific_setup(self, **kwargs):
+        super()._specific_setup(**kwargs)
+
+    def check_imaging_progress(self):
+        xml_file_pattern = "*.ome.zarr.xml"
+        xml_files = sorted(glob(os.path.join(self.path_on_fast_store, xml_file_pattern)))
+        if len(xml_files):
+            self.mark_imaging_finished()
+            log.info(f"Updated imaging status to finished for {self.path_on_fast_store}")
+            self.send_message('imaging_finished')
+            backup_zarr_v2_metadata_to_zip(xml_files[0].replace('.xml', ''))
+            self.start_processing()
+            self.update_processing_status('in_progress')
+            log.info(f"Updated processing status to in_progress for {self.path_on_fast_store}")
+            self.send_message('processing_started')
+            self.stitch_maxips()
+
+    def start_processing(self):
+        log.info(f"Queuing processing for {self.path_on_fast_store}")
+        cmd = [
+            '/h20/home/lab/miniconda3/envs/mesospim_dev/bin/python',
+            '/h20/home/lab/src/mesospim_utils_v0.1/mesospim_utils/automated.py',
+            # '/h20/home/lab/src/mesospim_utils_zarr/mesospim_utils/mesospim_utils/automated.py',
+            'automated-method-slurm',
+            self.path if ' ' not in self.path else f'"{self.path}"',
+            '--final-file-type', 'ims'
+        ]
+        subprocess.run(cmd)
+
+    def clean_up_before_moving(self):
+        if self.refractive_index:  # decon will be done
+            decon_folder = os.path.join(self.path_on_fast_store, 'decon')
+            if os.path.exists(decon_folder):
+                h5_files = glob(os.path.join(decon_folder, "*.h5"))
+                ome_zarr_dirs = glob(os.path.join(decon_folder, "*.ome.zarr"))
+                if len(h5_files) or len(ome_zarr_dirs):
+                    trash_loc = os.path.join(FASTSTORE_TRASH_LOCATION, self.pi, self.cl_number, self.name)
+                    os.makedirs(trash_loc, exist_ok=True)
+                    import shutil
+                    for f in h5_files:
+                        shutil.move(f, os.path.join(trash_loc, os.path.basename(f)))
+                    for f in ome_zarr_dirs:
+                        shutil.move(f, os.path.join(trash_loc, os.path.basename(f)))
+

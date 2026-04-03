@@ -39,7 +39,8 @@ FNAME_RE = re.compile(r"""
     _Ch(?P<ch>\d+)
     (?:_Sh(?P<sh>\d+))?
     (?:_Rot(?P<rot>\d+))?
-    \.btf\.tiff$
+    (?P<suffix>.*?)
+    (\.btf\.tiff|\.ome\.zarr\.tif)$
 """, re.VERBOSE | re.IGNORECASE)
 
 def parse_args():
