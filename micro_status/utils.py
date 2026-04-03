@@ -2,6 +2,12 @@ from datetime import datetime
 import requests
 from .settings import RESTRICT_MOVING_TIME, MOVE_TIMES
 
+import json
+import os
+import sys
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+
 
 def can_be_moved():
     # time restrictions
@@ -102,3 +108,80 @@ def fetch_thread_replies(channel, thread_ts):
     else:
         print("Failed to fetch replies:", data.get("error"))
         return []
+
+
+
+
+ZARR_V2_METADATA_FILENAMES = {".zattrs", ".zgroup", ".zarray"}
+
+
+def backup_zarr_v2_metadata_to_zip(
+    ome_zarr_path,
+    *,
+    include_manifest=True,
+    compression=ZIP_DEFLATED,
+):
+    """
+    Create a ZIP backup of Zarr v2 metadata files from an .ome.zarr dataset.
+
+    Captures:
+      - .zattrs and .zgroup (anywhere under the root)
+      - .zarray (for each array under the root; typical for multiscale pyramids)
+
+    Preserves folder structure by storing files with paths relative to ome_zarr_path.
+
+    Parameters
+    ----------
+    ome_zarr_path:
+        Filesystem path to the dataset root folder (e.g. ".../something.ome.zarr").
+    # zip_path:
+    #     Output ZIP file path.
+    include_manifest:
+        If True, writes MANIFEST.json listing all archived files.
+    compression:
+        zipfile compression mode (default ZIP_DEFLATED).
+
+    Returns
+    -------
+    Path to the created ZIP.
+    """
+    root = Path(ome_zarr_path).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise FileNotFoundError(f"ome_zarr_path does not exist or is not a directory: {root}")
+
+    zip_path = root / "metadata_backup.zip"
+    out_zip = Path(zip_path).expanduser().resolve()
+    out_zip.parent.mkdir(parents=True, exist_ok=True)
+
+    # Collect metadata files under root
+    metadata_files = []
+    for p in root.rglob("*"):
+        if p.is_file() and p.name in ZARR_V2_METADATA_FILENAMES:
+            metadata_files.append(p)
+
+    # (Optional) sanity check: warn if it looks like Zarr v3 (zarr.json),
+    # but we won't error; user asked for v2 metadata.
+    zarr_json = root / "zarr.json"
+    if zarr_json.exists():
+        # Zarr v3 marker exists at root; still proceed collecting v2 files found.
+        pass
+
+    # Write the ZIP with relative paths
+    archived_relpaths = []
+    with ZipFile(out_zip, mode="w", compression=compression) as zf:
+        for file_path in sorted(metadata_files):
+            rel = file_path.relative_to(root).as_posix()
+            zf.write(file_path, arcname=rel)
+            archived_relpaths.append(rel)
+
+        if include_manifest:
+            manifest = {
+                "root": root.name,
+                "metadata_filenames": sorted(ZARR_V2_METADATA_FILENAMES),
+                "file_count": len(archived_relpaths),
+                "files": archived_relpaths,
+            }
+            zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
+
+    return out_zip
+
