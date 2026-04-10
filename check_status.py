@@ -135,7 +135,6 @@ def check_RSCM_imaging():
             log.info(f"New RSCM dataset at {file_path}")
             # check whether it's an existing dataset that got renamed
             if os.path.exists(new_dataset_marker_json):
-                print("\t\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
                 # read .microstatus.json file in the root folder of the dataset
                 old_path_data = json.load(open(new_dataset_marker_json, 'r'))
                 old_path = old_path_data['path']
@@ -238,7 +237,6 @@ def check_mesoSPIM_imaging():
             if is_new:
                 log.info(f"New mesoSPIM dataset at {file_path}")
                 if os.path.exists(new_dataset_marker_json):
-                    print("\t\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
                     # # read .microstatus.json file in the root folder of the dataset
                     old_path_data = json.load(open(new_dataset_marker_json, 'r'))
                     old_path = old_path_data['path']
@@ -322,19 +320,6 @@ def check_mesoSPIM_imaging():
         except Exception:
             print(traceback.format_exc())
             continue
-
-
-def get_total_MesoSPIM_tiles(settings_bin_file):
-    import sys
-    sys.path.append('/h20/CBI/Iana/src/mesoSPIM-control')
-    sys.path.append('/h20/home/iana/.conda/envs/mesospim/lib/python3.12/site-packages')
-    import pickle
-    f = open(settings_bin_file, 'rb')
-    acquisition_list = pickle.load(f)
-    total_btf_files = len(acquisition_list)
-    return total_btf_files
-
-
 def list_jobs(user):
     """List active SLURM jobs for a specific user."""
     result = subprocess.run(["squeue", "-u", user], capture_output=True, text=True)
@@ -772,17 +757,16 @@ def check_mesoSPIM_processing():
                 except:
                     print("\t\tWARNING: Invalid dataset at", dataset_path[0])
                     continue
-            settings_bin_file = sorted(glob(os.path.join(dataset.path_on_fast_store, "*.bin")))
-            if len(settings_bin_file):
-                settings_bin_file = settings_bin_file[0]
-                total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
+            total_tile_files = dataset.get_total_MesoSPIM_tiles()
+            channels = dataset.get_total_MesoSPIM_colors_from_file_list()
+            if total_tile_files and channels:
                 if dataset.refractive_index:  # decon will be done
                     decon_folder = os.path.join(dataset.path_on_fast_store, 'decon')
                     imaris_folder = os.path.join(decon_folder, 'ims_files')
                     if type(dataset) == MesoSPIMDataset and os.path.exists(decon_folder):
                         decon_tif_files = os.listdir(decon_folder)
                         decon_tif_files = [x for x in decon_tif_files if x.endswith('.tif') and not x.startswith('psf_')]
-                        if len(decon_tif_files) == total_btf_files:
+                        if len(decon_tif_files) == total_tile_files:
                             # check all tiff files are the same size
                             tif_sizes = [os.path.getsize(os.path.join(decon_folder, x)) for x in decon_tif_files]
                             if len(set(tif_sizes)) == 1:
@@ -791,14 +775,10 @@ def check_mesoSPIM_processing():
                                 log.info(f"Changed processing status to decon_done for {dataset}")
                 else:  # no decon
                     imaris_folder = os.path.join(dataset.path_on_fast_store, 'ims_files')
-
                 if type(dataset) == MesoSPIMZarrDataset:
-                    print(">>>>>>>>>>>>>>>>dataset.refractive_index", dataset.refractive_index)
-                    print(">>>>>>>>>>>>>>>>imaris_folder", imaris_folder)
                     ims_files = sorted(glob(os.path.join(imaris_folder, '*.ims')))
                     if len(ims_files):
                         try:
-                            print(">>>>>>>>>>>>>>>>>>>>>>> IMS FILE EXISTS")
                             ims_file = ims(ims_files[0])
                         except:
                             print("\t\tbuilding montage")
@@ -814,8 +794,7 @@ def check_mesoSPIM_processing():
 
                 ims_files = sorted(glob(os.path.join(imaris_folder, '*Tile*_Ch*_Sh*.ims')))
                 total_ims_files = len(ims_files)
-                channels = dataset.get_total_MesoSPIM_colors_from_file_list()
-                if total_ims_files == int(total_btf_files / channels):
+                if total_ims_files == int(total_tile_files / channels):
                     all_ims_files_open = dataset.check_tile_ims_files()
                     if all_ims_files_open:
                         dataset.update_processing_status("ims_converted")
@@ -861,9 +840,10 @@ def check_mesoSPIM_processing():
         ims_files = sorted(glob(os.path.join(imaris_folder, '*Tile*_Ch*_Sh*.ims')))
         total_ims_files = len(ims_files)
         channels = dataset.get_total_MesoSPIM_colors_from_file_list()
-        settings_bin_file = sorted(glob(os.path.join(dataset.path_on_fast_store, "*.bin")))[0]
-        total_btf_files = get_total_MesoSPIM_tiles(settings_bin_file)
-        if total_ims_files == int(total_btf_files / channels):
+        total_tile_files = dataset.get_total_MesoSPIM_tiles()
+        if not total_tile_files or not channels:
+            continue
+        if total_ims_files == int(total_tile_files / channels):
             all_ims_files_open = dataset.check_tile_ims_files()
             if all_ims_files_open:
                 dataset.update_processing_status("ims_converted")
