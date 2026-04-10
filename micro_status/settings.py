@@ -46,6 +46,7 @@ DATA_LOCATION = {
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 PEACE_JSON_FOLDER = "/h20/CBI/Iana/json"
 BRAIN_DATA_PRODUCERS = ["klimstra", "cebra", "dutta", "dermody"]
+OME_ZARR_PIS = set("delima-s")
 
 DASK_JSON_PATH = "/CBI_FastStore/cbiPythonTools/RSCM/RSCM/dask_scheduler_info.json"
 if os.path.exists(DASK_JSON_PATH):
