@@ -44,7 +44,7 @@ class MesoSPIMDataset(Dataset):
 
             ri = [l for l in lines if "[ETL CFG File]" in l]
             if ri:
-                ri_value = re.findall(r"_RI_([0-9]*\.[0-9]+)_?", ri[0])
+                ri_value = re.findall(r"_?RI_?([0-9]*\.[0-9]+)_?", ri[0])
                 if ri_value:
                     self.refractive_index = float(ri_value[0])
 
