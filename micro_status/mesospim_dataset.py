@@ -196,8 +196,9 @@ class MesoSPIMDataset(Dataset):
             # '/h20/home/lab/src/mesospim_utils_zarr/mesospim_utils/mesospim_utils/automated.py',
             'automated-method-slurm',
             self.path if ' ' not in self.path else f'"{self.path}"',
-            '--final-file-type', 'ims'
         ]
+        if self.pi not in OME_ZARR_PIS:
+            cmd.extend(['--final-file-type', 'ims'])
         subprocess.run(cmd)
 
     def check_tile_ims_files(self):
@@ -338,8 +339,9 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
             # '/h20/home/lab/src/mesospim_utils_zarr/mesospim_utils/mesospim_utils/automated.py',
             'automated-method-slurm',
             self.path if ' ' not in self.path else f'"{self.path}"',
-            '--final-file-type', 'ims'
         ]
+        if self.pi not in OME_ZARR_PIS:
+            cmd.extend(['--final-file-type', 'ims'])
         subprocess.run(cmd)
 
     def clean_up_before_moving(self):
