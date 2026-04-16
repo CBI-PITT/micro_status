@@ -960,6 +960,45 @@ def check_storage():
     hive_used_percent = int(hive_used_percent_str.replace("%", ""))
     check(hive_used_percent, "hive")
     check(faststore_used_percent, "faststore")
+
+
+def cleanup_mesospim_trash():
+    today = datetime.today()
+    if today.weekday() != 6:
+        return
+
+    year, week_number, _ = today.isocalendar()
+    current_week = f"{year}-{week_number:02d}"
+    marker_path = MESOSPIM_TRASH_CLEANUP_MARKER
+
+    if os.path.exists(marker_path):
+        with open(marker_path, 'r') as f:
+            if f.read().strip() == current_week:
+                return
+
+    trash_root = MESOSPIM_FASTSTORE_TRASH_FOLDER
+    if os.path.exists(trash_root):
+        log.info(f"Cleaning up MesoSPIM trash at {trash_root}")
+        cutoff_ts = time.time() - (7 * 24 * 60 * 60)
+        for entry in os.scandir(trash_root):
+            try:
+                entry_mtime = entry.stat(follow_symlinks=False).st_mtime
+            except FileNotFoundError:
+                continue
+            if entry_mtime > cutoff_ts:
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                shutil.rmtree(entry.path)
+            else:
+                os.remove(entry.path)
+    else:
+        log.info(f"MesoSPIM trash folder does not exist: {trash_root}")
+
+    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+    with open(marker_path, 'w') as f:
+        f.write(current_week)
+
+
 def check_analysis():
     """
     If the finished dataset is a brain, send it for analysis by PEACE pipeline
@@ -1094,6 +1133,7 @@ class Found(BaseException):
 def scan():
     try:
         check_storage()
+        cleanup_mesospim_trash()
         check_RSCM_imaging()
         check_mesoSPIM_imaging()
         check_RSCM_processing()
@@ -1112,6 +1152,7 @@ def scan():
 
 def scan_debug():
     check_storage()
+    cleanup_mesospim_trash()
     check_RSCM_imaging()
     check_mesoSPIM_imaging()
     check_RSCM_processing()

@@ -16,6 +16,8 @@ DB_LOCATION = "/CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db"
 DB_BACKUPS_DIR = "/CBI_FastStore/Iana/db_backups"
 FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
 HIVE_TRASH_LOCATION = "/h20/trash"
+MESOSPIM_FASTSTORE_TRASH_FOLDER = os.path.join(FASTSTORE_TRASH_LOCATION, "MesoSPIM")
+MESOSPIM_TRASH_CLEANUP_MARKER = "/CBI_FastStore/tmp/mesospim_trash_cleanup_week.txt"
 
 SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()
