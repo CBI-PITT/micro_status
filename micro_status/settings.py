@@ -56,7 +56,8 @@ else:
     dask_json = None
     DASK_DASHBOARD = None
 
-RESTRICT_MOVING_TIME = True
+ALLOW_MOVES_ANYTIME = True
+RESTRICT_MOVING_TIME = False
 MOVE_TIMES = {'start': 17, 'stop': 6}
 
 MESOSPIM_AUTO_STITCH_FOLDER = "/CBI_FastStore/tmp/stitch_jobs"

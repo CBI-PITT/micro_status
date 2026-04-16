@@ -1,6 +1,6 @@
 from datetime import datetime
 import requests
-from .settings import RESTRICT_MOVING_TIME, MOVE_TIMES
+from .settings import ALLOW_MOVES_ANYTIME, RESTRICT_MOVING_TIME, MOVE_TIMES
 
 import json
 import os
@@ -10,6 +10,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 
 def can_be_moved():
+    if ALLOW_MOVES_ANYTIME:
+        return True
     # time restrictions
     if not RESTRICT_MOVING_TIME:
         return True
@@ -184,4 +186,3 @@ def backup_zarr_v2_metadata_to_zip(
             zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
 
     return out_zip
-

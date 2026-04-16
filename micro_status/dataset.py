@@ -368,7 +368,7 @@ class Dataset:
 set -euo pipefail
 
 SRC={shlex.quote(src_path)}
-DST={shlex.quote(dst_path)}
+BASE_DST={shlex.quote(dst_path)}
 TRASH={shlex.quote(trash_path)}
 COMPLETE_MARKER={shlex.quote(self.move_complete_marker)}
 ERROR_MARKER={shlex.quote(self.move_error_marker)}
@@ -376,10 +376,19 @@ ERROR_MARKER={shlex.quote(self.move_error_marker)}
 cleanup_on_error() {{
     status=$?
     mkdir -p \"$(dirname \"$ERROR_MARKER\")\"
-    printf 'move failed for %s -> %s (exit %s)\n' \"$SRC\" \"$DST\" \"$status\" > \"$ERROR_MARKER\"
+    printf 'move failed for %s -> %s (exit %s)\n' \"$SRC\" \"${{DST:-$BASE_DST}}\" \"$status\" > \"$ERROR_MARKER\"
     exit $status
 }}
 trap cleanup_on_error ERR
+
+DST="$BASE_DST"
+if [ -e "$DST" ]; then
+    suffix=2
+    while [ -e "${{BASE_DST}}_${{suffix}}" ]; do
+        suffix=$((suffix + 1))
+    done
+    DST="${{BASE_DST}}_${{suffix}}"
+fi
 
 mkdir -p \"$(dirname \"$DST\")\" \"$(dirname \"$TRASH\")\" \"$(dirname \"$COMPLETE_MARKER\")\"
 
@@ -491,7 +500,8 @@ rm -f \"$ERROR_MARKER\"
 
         moved = os.path.exists(self.move_complete_marker)
         if moved:
-            path_on_hive = self.target_path_on_hive
+            with open(self.move_complete_marker, 'r') as f:
+                path_on_hive = f.read().strip()
             if os.path.exists(path_on_hive):
                 self.update_db_field('path_on_hive', path_on_hive)
                 self.path_on_hive = path_on_hive
