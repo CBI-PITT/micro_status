@@ -1,10 +1,10 @@
 # AGENTS.md
 ## Purpose
 This repository is a small Python monitoring service for RSCM and MesoSPIM datasets.
-It watches acquisition and processing directories, updates a SQLite database, and posts Slack notifications.
-Most code is script-driven and tightly coupled to the lab filesystem and cluster environment.
-This file tells coding agents what is actually true in this repo.
-Do not assume modern packaging, lint, test, or CI tooling exists unless you add it intentionally.
+It watches acquisition and processing folders, updates a SQLite database, posts Slack notifications, and submits cluster jobs.
+Most code is script-driven and coupled to the lab filesystem and SLURM environment.
+This file tells coding agents what is true in this repo today.
+Do not assume modern packaging, CI, lint, or test tooling exists unless you add it explicitly.
 
 ## Repo Facts
 - Main entrypoint: `check_status.py`
@@ -12,20 +12,19 @@ Do not assume modern packaging, lint, test, or CI tooling exists unless you add 
 - Other scripts: `create_db.py`, `populate_db.py`, `cleanup_db.py`
 - Shell helpers: `run_cbpy.sh`, `run_rscm_cluster.sh`
 - Dependency file: `requirements.txt`
-- README usage is operational and environment-specific
-- No `AGENTS.md` existed here before this one
 - No Cursor rules were found in `.cursor/rules/` or `.cursorrules`
 - No Copilot instructions were found in `.github/copilot-instructions.md`
 
 ## Environment Notes
-- The code assumes lab-specific absolute paths under `/CBI_FastStore`, `/h20`, and `/h20/home/lab`
-- The code expects a `.env` file for Slack credentials
-- The code performs real filesystem, database, HTTP, and subprocess side effects
-- The shell in this workspace uses `python3`, not `python`
-- Many scripts are not portable outside the lab environment
+- Run commands from the repository root
+- Use `python3`, not `python`
+- The code assumes absolute lab paths under `/CBI_FastStore`, `/h20`, and `/h20/home/lab`
+- `.env` is used for Slack credentials
+- `micro_status/local_settings.py` exists locally and is intended for machine-specific private settings
+- Many scripts have real side effects: filesystem mutation, SQLite writes, Slack messages, `sbatch`, `scancel`, `rclone`
+- `python3 check_status.py` is not a safe smoke test; it can touch production-like resources
 
 ## Setup
-Run from the repository root.
 Install dependencies:
 ```bash
 python3 -m pip install -r requirements.txt
@@ -38,8 +37,8 @@ python3 -m pip install -r requirements.txt
 ```
 
 ## Build
-There is no package build system, Makefile, Dockerfile, or wheel build.
-Treat build validation as dependency installation plus syntax checking.
+There is no package build system, wheel build, Makefile, or Docker build.
+Treat build validation as syntax checking plus dependency installation.
 Recommended validation command:
 ```bash
 python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status
@@ -57,14 +56,13 @@ python3 create_db.py
 python3 populate_db.py
 python3 cleanup_db.py
 ```
-Safe-ish CLI inspection:
+Safer CLI inspection:
 ```bash
 python3 micro_status/validate_tiles.py --help
 ```
-Be careful with `python3 check_status.py`; it can touch the real database, filesystem, Slack, and cluster jobs.
 
 ## Lint
-There is no committed linter configuration in this repo.
+There is no committed linter configuration.
 No `ruff`, `flake8`, `pylint`, `black`, `isort`, or `mypy` config files were found.
 Use syntax validation as the minimum non-invasive lint check:
 ```bash
@@ -73,7 +71,7 @@ python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py 
 
 ## Tests
 There is no committed automated test suite.
-No `tests/` directory, `pytest.ini`, or test modules were found.
+No `tests/` directory, `pytest.ini`, `conftest.py`, or test modules were found.
 Observed status:
 - `python3 -m pytest --version` fails because `pytest` is not installed here
 - There are no committed tests to run
@@ -91,6 +89,13 @@ python3 -m pytest path/to/test_file.py::test_name
 ```
 Until then, do not claim that a single-test workflow exists.
 
+## Config Guidance
+- Treat `micro_status/settings.py` as operational code plus defaults
+- Keep secrets in `.env`
+- Keep machine- or deployment-specific private values in `micro_status/local_settings.py`
+- Do not commit real tokens, private path roots, or PI-specific private config to tracked files unless explicitly asked
+- Be careful when editing settings: this repo currently still contains some tracked hard-coded operational values
+
 ## Style Overview
 Follow the existing Python style where practical, but prefer the smallest correct improvement.
 Do not do broad cleanup or modernization unless the task requires it.
@@ -99,7 +104,7 @@ Do not do broad cleanup or modernization unless the task requires it.
 - Group imports as stdlib, third-party, then local imports
 - Prefer one import per line unless names are tightly related
 - Prefer explicit imports over wildcard imports in new code
-- Existing files use `from micro_status.settings import *`; do not spread that pattern further
+- Existing files use `from micro_status.settings import *`; do not spread that pattern further unless required for consistency in the edited area
 - Prefer relative imports inside `micro_status/` when editing package modules
 - Avoid function-local imports unless they defer optional or heavy dependencies
 
@@ -122,10 +127,10 @@ Do not do broad cleanup or modernization unless the task requires it.
 - Functions and variables: `snake_case`
 - Classes: `PascalCase`
 - Constants and settings: `UPPER_SNAKE_CASE`
-- Prefer descriptive domain names like `path_on_fast_store` over vague abbreviations
+- Prefer descriptive domain names like `path_on_fast_store`, `processing_summary`, and `move_complete_marker`
 
 ## Error Handling
-- Assume external failures can happen: filesystem, SQLite, HTTP, Slack, and cluster commands
+- Assume external failures can happen: filesystem, SQLite, HTTP, Slack, `rclone`, and SLURM commands
 - Avoid new bare `except:` blocks
 - Catch specific exceptions when feasible
 - Log enough context to identify the dataset, path, job, or external call that failed
@@ -153,6 +158,7 @@ Do not do broad cleanup or modernization unless the task requires it.
 - Do not delete or move dataset files unless the task explicitly requires it
 - Slack posting is real when `MESSAGES_ENABLED` is true
 - Cluster commands such as `sbatch`, `squeue`, and `scancel` are used directly
+- The move workflow now creates per-dataset SLURM scripts and uses `rclone copy`, `rclone check`, and then moves the source dataset to FastStore trash
 - Prefer dry inspection and targeted validation before running operational scripts
 
 ## Working Rules
@@ -160,7 +166,7 @@ Do not do broad cleanup or modernization unless the task requires it.
 - Preserve behavior unless the task is to change behavior
 - Prefer focused fixes over broad refactors
 - If you touch wildcard imports, hard-coded paths, or broad exception handling, improve only the area required for the task
-- If you add tests, keep them isolated from real lab infrastructure and document how to run one test
+- If you add tests later, keep them isolated from real lab infrastructure and document how to run one test
 
 ## Do Not Assume
 - Do not assume CI exists
