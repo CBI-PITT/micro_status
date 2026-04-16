@@ -707,7 +707,7 @@ def check_moving():
     con = sqlite3.connect(DB_LOCATION)
     cur = con.cursor()
     records = cur.execute(
-        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="finished" AND moved=0'
+        f'SELECT path_on_fast_store FROM dataset WHERE processing_status="finished" AND moved=0 AND paused=0'
     ).fetchall()
     for dataset_path in records:
         print("\t-", dataset_path[0])
@@ -776,10 +776,10 @@ def check_mesoSPIM_processing():
                 else:  # no decon
                     imaris_folder = os.path.join(dataset.path_on_fast_store, 'ims_files')
                 if type(dataset) == MesoSPIMZarrDataset:
-                    ims_files = sorted(glob(os.path.join(imaris_folder, '*.ims')))
-                    if len(ims_files):
+                    final_ims_file = dataset.full_path_to_imaris_file
+                    if final_ims_file:
                         try:
-                            ims_file = ims(ims_files[0])
+                            ims_file = ims(final_ims_file)
                         except:
                             print("\t\tbuilding montage")
                         try:
@@ -960,23 +960,6 @@ def check_storage():
     hive_used_percent = int(hive_used_percent_str.replace("%", ""))
     check(hive_used_percent, "hive")
     check(faststore_used_percent, "faststore")
-
-
-def move_files():
-    if can_be_moved():
-        # move all files from tempQueue to QueueStitch
-        files_in_temp_queue = sorted(glob(os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', '*move.txt')))
-        for file in files_in_temp_queue:
-            path_in_queue = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', os.path.basename(file))
-            shutil.move(file, path_in_queue)
-    else:
-        # move all files from QueueStitch to tempQueue
-        files_in_queue = sorted(glob(os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', '*move.txt')))
-        for file in files_in_queue:
-            path_in_temp_queue = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', os.path.basename(file))
-            shutil.move(file, path_in_temp_queue)
-
-
 def check_analysis():
     """
     If the finished dataset is a brain, send it for analysis by PEACE pipeline
@@ -1115,7 +1098,6 @@ def scan():
         check_mesoSPIM_imaging()
         check_RSCM_processing()
         check_mesoSPIM_processing()
-        move_files()
         check_moving()
         db_backup()
         # check_analysis()
@@ -1134,7 +1116,6 @@ def scan_debug():
     check_mesoSPIM_imaging()
     check_RSCM_processing()
     check_mesoSPIM_processing()
-    move_files()
     check_moving()
     db_backup()
     # check_analysis()
