@@ -642,5 +642,14 @@ rm -f \"$ERROR_MARKER\"
         relative_path = os.path.relpath(self.path_on_fast_store, FASTSTORE_ACQUISITION_FOLDER)
         return os.path.join(FASTSTORE_TRASH_LOCATION, relative_path)
 
+    def target_cleanup_path_in_trash(self, source_path):
+        if source_path.startswith(FASTSTORE_ACQUISITION_FOLDER):
+            relative_path = os.path.relpath(source_path, FASTSTORE_ACQUISITION_FOLDER)
+            return os.path.join(FASTSTORE_TRASH_LOCATION, relative_path)
+        if source_path.startswith(HIVE_ACQUISITION_FOLDER):
+            relative_path = os.path.relpath(source_path, HIVE_ACQUISITION_FOLDER)
+            return os.path.join(HIVE_TRASH_LOCATION, relative_path)
+        return None
+
 class Found(BaseException):
     pass

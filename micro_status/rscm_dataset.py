@@ -230,15 +230,11 @@ class RSCMDataset(Dataset):
             return
         raw_composites = sorted(glob(os.path.join(self.composites_dir, 'composite_*.tif')))
         log.info(f"raw_composites: {len(raw_composites)}")
-        if self.composites_dir.startswith('/CBI_FastStore'):
-            trash_location = FASTSTORE_TRASH_LOCATION
-        else:
-            trash_location = HIVE_TRASH_LOCATION
-        trash_folder_raw = os.path.join(trash_location, self.pi, self.cl_number, self.name, "raw_composites")
-        if not os.path.exists(trash_folder_raw):
-            os.makedirs(trash_folder_raw)
         for f in raw_composites:
-            trash_path = os.path.join(trash_folder_raw, os.path.basename(f))
+            trash_path = self.target_cleanup_path_in_trash(f)
+            if not trash_path:
+                continue
+            os.makedirs(os.path.dirname(trash_path), exist_ok=True)
             shutil.move(f, trash_path)
 
     def clean_up_denoised_composites(self):
@@ -247,15 +243,11 @@ class RSCMDataset(Dataset):
             return
         denoised_composites = sorted(glob(os.path.join(self.job_dir, 'composite_*.tif')))
         log.info(f"denoised_composites: {len(denoised_composites)}")
-        if self.full_path_to_imaris_file.startswith('/CBI_FastStore'):
-            trash_location = FASTSTORE_TRASH_LOCATION
-        else:
-            trash_location = HIVE_TRASH_LOCATION
-        trash_folder_denoised = os.path.join(trash_location, self.pi, self.cl_number, self.name, "denoised_composites")
-        if not os.path.exists(trash_folder_denoised):
-            os.makedirs(trash_folder_denoised)
         for f in denoised_composites:
-            trash_path = os.path.join(trash_folder_denoised, os.path.basename(f))
+            trash_path = self.target_cleanup_path_in_trash(f)
+            if not trash_path:
+                continue
+            os.makedirs(os.path.dirname(trash_path), exist_ok=True)
             shutil.move(f, trash_path)
 
     def update_job_number(self, job_number):

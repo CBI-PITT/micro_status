@@ -349,13 +349,19 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
                 h5_files = glob(os.path.join(decon_folder, "*.h5"))
                 ome_zarr_dirs = glob(os.path.join(decon_folder, "*.ome.zarr"))
                 if len(h5_files) or len(ome_zarr_dirs):
-                    trash_loc = os.path.join(FASTSTORE_TRASH_LOCATION, self.pi, self.cl_number, self.name)
-                    os.makedirs(trash_loc, exist_ok=True)
                     import shutil
                     for f in h5_files:
-                        shutil.move(f, os.path.join(trash_loc, os.path.basename(f)))
+                        trash_path = self.target_cleanup_path_in_trash(f)
+                        if not trash_path:
+                            continue
+                        os.makedirs(os.path.dirname(trash_path), exist_ok=True)
+                        shutil.move(f, trash_path)
                     for f in ome_zarr_dirs:
-                        shutil.move(f, os.path.join(trash_loc, os.path.basename(f)))
+                        trash_path = self.target_cleanup_path_in_trash(f)
+                        if not trash_path:
+                            continue
+                        os.makedirs(os.path.dirname(trash_path), exist_ok=True)
+                        shutil.move(f, trash_path)
 
     @property
     def final_imaris_search_dir(self):
