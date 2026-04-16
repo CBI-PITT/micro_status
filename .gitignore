@@ -152,12 +152,15 @@ celerybeat-schedule
 
 # Environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+micro_status/local_settings.py
 
 # Spyder project settings
 .spyderproject
@@ -175,5 +178,3 @@ venv.bak/
 .idea/
 
 *.~lock.*
-
-
