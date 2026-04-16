@@ -776,10 +776,10 @@ def check_mesoSPIM_processing():
                 else:  # no decon
                     imaris_folder = os.path.join(dataset.path_on_fast_store, 'ims_files')
                 if type(dataset) == MesoSPIMZarrDataset:
-                    ims_files = sorted(glob(os.path.join(imaris_folder, '*.ims')))
-                    if len(ims_files):
+                    final_ims_file = dataset.full_path_to_imaris_file
+                    if final_ims_file:
                         try:
-                            ims_file = ims(ims_files[0])
+                            ims_file = ims(final_ims_file)
                         except:
                             print("\t\tbuilding montage")
                         try:

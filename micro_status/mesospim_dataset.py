@@ -358,6 +358,19 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
                         shutil.move(f, os.path.join(trash_loc, os.path.basename(f)))
 
     @property
+    def final_imaris_search_dir(self):
+        if self.refractive_index:
+            return os.path.join(self.path_on_fast_store, 'decon')
+        return self.path_on_fast_store
+
+    @property
+    def full_path_to_imaris_file(self):
+        candidates = sorted(glob(os.path.join(self.final_imaris_search_dir, '*.ims')))
+        if len(candidates):
+            return candidates[0]
+        return None
+
+    @property
     def tile_files(self):
         if not os.path.exists(self.path_on_fast_store):
             return []
