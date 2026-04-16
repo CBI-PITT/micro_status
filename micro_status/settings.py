@@ -46,6 +46,7 @@ DATA_LOCATION = {
 DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
 PEACE_JSON_FOLDER = "/h20/CBI/Iana/json"
 BRAIN_DATA_PRODUCERS = ["klimstra", "cebra", "dutta", "dermody"]
+OME_ZARR_PIS = set('klimstra-w', 'delima-s')
 
 DASK_JSON_PATH = "/CBI_FastStore/cbiPythonTools/RSCM/RSCM/dask_scheduler_info.json"
 if os.path.exists(DASK_JSON_PATH):
@@ -59,4 +60,5 @@ RESTRICT_MOVING_TIME = True
 MOVE_TIMES = {'start': 17, 'stop': 6}
 
 MESOSPIM_AUTO_STITCH_FOLDER = "/CBI_FastStore/tmp/stitch_jobs"
+MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 NEW_DATASET_MARKER_FILENAME = ".microstatus.json"

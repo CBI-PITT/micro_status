@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import requests
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -17,6 +18,7 @@ from bs4 import BeautifulSoup
 from imaris_ims_file_reader import ims
 
 from micro_status.settings import *
+from micro_status.utils import can_be_moved
 
 log = logging.getLogger(__name__)
 
@@ -341,17 +343,63 @@ class Dataset:
 
 
     def start_moving(self):
-        """create txt file in the RSCM queue stitch directory
-        file name: {dataset_id}_{pi_name}_{cl_number}_{dataset_name}_move.txt
-        this way the earlier datasets go in first
-        """
-        dat_file_path = Path(self.path_on_fast_store)
-        # txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'queueStitch', self.rscm_move_txt_file_name)
-        txt_file_path = os.path.join(RSCM_FOLDER_STITCHING, 'tempQueue', self.rscm_move_txt_file_name)
-        contents = f'rootDir="{str(dat_file_path)}"\nIMS=False\ndenoise=False\nmoveOnly=True'
-        with open(txt_file_path, "w") as f:
-            f.write(contents)
-        log.info(f"Queue moving to Hive Text file for {self.path_on_fast_store}")
+        if self.moved or self.moving:
+            return
+        if not can_be_moved():
+            log.info(f"Move window closed for {self.path_on_fast_store}")
+            return
+
+        self._ensure_move_job_dirs()
+        for marker in [self.move_complete_marker, self.move_error_marker]:
+            if os.path.exists(marker):
+                os.remove(marker)
+
+        src_path = self.path_on_fast_store
+        dst_path = self.target_path_on_hive
+        trash_path = self.target_path_in_trash
+        script_contents = f"""#!/bin/bash
+#SBATCH --job-name={self.move_job_name}
+#SBATCH --partition=compute
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --output={self.move_log_path}
+#SBATCH --error={self.move_log_path}
+
+set -euo pipefail
+
+SRC={shlex.quote(src_path)}
+DST={shlex.quote(dst_path)}
+TRASH={shlex.quote(trash_path)}
+COMPLETE_MARKER={shlex.quote(self.move_complete_marker)}
+ERROR_MARKER={shlex.quote(self.move_error_marker)}
+
+cleanup_on_error() {{
+    status=$?
+    mkdir -p \"$(dirname \"$ERROR_MARKER\")\"
+    printf 'move failed for %s -> %s (exit %s)\n' \"$SRC\" \"$DST\" \"$status\" > \"$ERROR_MARKER\"
+    exit $status
+}}
+trap cleanup_on_error ERR
+
+mkdir -p \"$(dirname \"$DST\")\" \"$(dirname \"$TRASH\")\" \"$(dirname \"$COMPLETE_MARKER\")\"
+
+rclone copy \"$SRC\" \"$DST\" --progress --transfers=4 --checkers=8 --size-only --fast-list
+rclone check \"$SRC\" \"$DST\" --size-only
+mv \"$SRC\" \"$TRASH\"
+printf '%s\n' \"$DST\" > \"$COMPLETE_MARKER\"
+rm -f \"$ERROR_MARKER\"
+"""
+        with open(self.move_script_path, "w") as f:
+            f.write(script_contents)
+
+        os.chmod(self.move_script_path, 0o750)
+        result = subprocess.run(["sbatch", self.move_script_path], capture_output=True, text=True)
+        if result.returncode != 0:
+            log.error(f"Failed to submit move job for {self.path_on_fast_store}: {result.stderr.strip()}")
+            self.mark_processing_paused()
+            return
+
+        log.info(f"Submitted move job for {self.path_on_fast_store}: {result.stdout.strip()}")
         self.moving = True
         self.update_db_field('moving', 1)
 
@@ -434,27 +482,28 @@ class Dataset:
         return f"{str(self.db_id).zfill(5)}_{self.pi}_{self.cl_number}_{self.name}_move.txt"
 
     def check_if_moved(self):
-        moved = os.path.exists(os.path.join(RSCM_FOLDER_STITCHING, 'complete', self.rscm_move_txt_file_name))
+        if os.path.exists(self.move_error_marker):
+            log.error(f"Move job failed for {self.path_on_fast_store}; see {self.move_error_marker}")
+            self.update_db_field('moving', 0)
+            self.moving = False
+            self.mark_processing_paused()
+            return
+
+        moved = os.path.exists(self.move_complete_marker)
         if moved:
-            path_on_hive = self.path_on_fast_store.replace(FASTSTORE_ACQUISITION_FOLDER, HIVE_ACQUISITION_FOLDER)
+            path_on_hive = self.target_path_on_hive
             if os.path.exists(path_on_hive):
                 self.update_db_field('path_on_hive', path_on_hive)
                 self.path_on_hive = path_on_hive
-                print(">>>>>>>>>>>>>>>path_to_ims_file_on_hive", self.path_to_ims_file_on_hive)
+                self.update_db_field('moved', 1)
+                self.moved = True
+                self.update_db_field('moving', 0)
+                self.moving = False
+                self.update_db_field('paused', 0)
+                self.paused = False
+                self.send_message('moved')
                 if self.path_to_ims_file_on_hive and os.path.exists(self.path_to_ims_file_on_hive):
-                    try:
-                        f = ims(self.path_to_ims_file_on_hive)
-                    except:
-                        pass
-                    else:
-                        self.update_db_field('moved', 1)
-                        self.moved = True
-                        self.update_db_field('moving', 0)
-                        self.moving = False
-                        self.update_db_field('paused', 0)
-                        self.paused = False
-                        self.send_message('moved')
-                        self.move_from_acquire_to_public()
+                    self.move_from_acquire_to_public()
 
     def mark_processing_paused(self):
         self.update_db_field("processing_status", "needs_attention")
@@ -523,6 +572,65 @@ class Dataset:
         # if something went wrong, send message
         if failure_flag:
             self.send_message('cant_make_public')
+
+    def _ensure_move_job_dirs(self):
+        for path in [
+            self.move_scripts_dir,
+            self.move_logs_dir,
+            self.move_complete_dir,
+            self.move_error_dir,
+        ]:
+            os.makedirs(path, exist_ok=True)
+
+    @property
+    def move_job_base_name(self):
+        raw_name = f"{str(self.db_id).zfill(5)}_{self.pi}_{self.cl_number}_{self.name}"
+        return re.sub(r'[^A-Za-z0-9._-]+', '_', raw_name)
+
+    @property
+    def move_job_name(self):
+        return f"move_{str(self.db_id).zfill(5)}"
+
+    @property
+    def move_scripts_dir(self):
+        return os.path.join(MOVE_JOBS_DIR, 'scripts')
+
+    @property
+    def move_logs_dir(self):
+        return os.path.join(MOVE_JOBS_DIR, 'logs')
+
+    @property
+    def move_complete_dir(self):
+        return os.path.join(MOVE_JOBS_DIR, 'complete')
+
+    @property
+    def move_error_dir(self):
+        return os.path.join(MOVE_JOBS_DIR, 'error')
+
+    @property
+    def move_script_path(self):
+        return os.path.join(self.move_scripts_dir, f"{self.move_job_base_name}.sbatch.sh")
+
+    @property
+    def move_log_path(self):
+        return os.path.join(self.move_logs_dir, f"{self.move_job_base_name}.log")
+
+    @property
+    def move_complete_marker(self):
+        return os.path.join(self.move_complete_dir, f"{self.move_job_base_name}.done")
+
+    @property
+    def move_error_marker(self):
+        return os.path.join(self.move_error_dir, f"{self.move_job_base_name}.error")
+
+    @property
+    def target_path_on_hive(self):
+        return self.path_on_fast_store.replace(FASTSTORE_ACQUISITION_FOLDER, HIVE_ACQUISITION_FOLDER)
+
+    @property
+    def target_path_in_trash(self):
+        relative_path = os.path.relpath(self.path_on_fast_store, FASTSTORE_ACQUISITION_FOLDER)
+        return os.path.join(FASTSTORE_TRASH_LOCATION, relative_path)
 
 class Found(BaseException):
     pass
