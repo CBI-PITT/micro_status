@@ -142,12 +142,14 @@ def check_RSCM_imaging():
                 dataset.update_db_field('path_on_fast_store', file_path)
                 log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
                 dataset.path_on_fast_store = file_path
+                path_data = {"path": file_path}
+                json.dump(path_data, open(new_dataset_marker_json, "w"))
             else:
                 dataset = RSCMDataset.create(file_path)
                 # create .microstatus.json file in the root folder of the dataset
                 path_data = {"path": file_path}
                 json.dump(path_data, open(new_dataset_marker_json, "w"))
-                if "demo" in dataset.name.lower() or "test" in dataset.path_on_fast_store.lower():
+                if "demo" in str(dataset.name).lower() or "test" in str(dataset.path_on_fast_store).lower():
                     # demo dataset
                     log.info(f"Ignoring demo dataset {dataset}")
                     print(f"\t\t\tIgnoring demo dataset {dataset}")
@@ -244,12 +246,14 @@ def check_mesoSPIM_imaging():
                     dataset.update_db_field('path_on_fast_store', file_path)
                     log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
                     dataset.path_on_fast_store = file_path
+                    path_data = {"path": file_path}
+                    json.dump(path_data, open(new_dataset_marker_json, "w"))
                 else:
                     dataset = MesoSPIMDataset.create(file_path)
                     # create .microstatus.json file in the root folder of the dataset
                     path_data = {"path": file_path}
                     json.dump(path_data, open(new_dataset_marker_json, "w"))
-                    if "demo" in dataset.name.lower() or "test" in dataset.path_on_fast_store.lower():
+                    if "demo" in str(dataset.name).lower() or "test" in str(dataset.path_on_fast_store).lower():
                         # demo dataset
                         log.info(f"Ignoring demo dataset {dataset}")
                         print(f"Ignoring demo dataset {dataset}")
@@ -294,6 +298,14 @@ def check_mesoSPIM_imaging():
                 log.info(f"New mesoSPIM dataset at {file_path}")
                 if os.path.exists(new_dataset_marker_json):
                     print("\t\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
+                    old_path_data = json.load(open(new_dataset_marker_json, 'r'))
+                    old_path = old_path_data['path']
+                    dataset = MesoSPIMZarrDataset(old_path)
+                    dataset.update_db_field('path_on_fast_store', file_path)
+                    log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
+                    dataset.path_on_fast_store = file_path
+                    path_data = {"path": file_path}
+                    json.dump(path_data, open(new_dataset_marker_json, "w"))
                 else:
                     dataset = MesoSPIMZarrDataset.create(file_path)
                     # create .microstatus.json file in the root folder of the dataset
@@ -310,7 +322,8 @@ def check_mesoSPIM_imaging():
                         continue
                     dataset.send_message('imaging_started')
 
-            dataset = MesoSPIMZarrDataset(file_path)
+            if not is_new:
+                dataset = MesoSPIMZarrDataset(file_path)
             print("\t\t\t", dataset.imaging_status)
             if not os.path.exists(new_dataset_marker_json):
                 path_data = {"path": file_path}
@@ -783,6 +796,7 @@ def check_mesoSPIM_processing():
                         except:
                             print("\t\tbuilding montage")
                         try:
+                            dataset.update_imaris_file_path(final_ims_file)
                             dataset.update_processing_status('finished')
                             log.info(f"Changed processing status to finished for {dataset}")
                             dataset.send_message('processing_finished')
@@ -988,9 +1002,11 @@ def cleanup_mesospim_trash():
             if entry_mtime > cutoff_ts:
                 continue
             if entry.is_dir(follow_symlinks=False):
-                shutil.rmtree(entry.path)
+                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
+                    shutil.rmtree(entry.path)
             else:
-                os.remove(entry.path)
+                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
+                    os.remove(entry.path)
     else:
         log.info(f"MesoSPIM trash folder does not exist: {trash_root}")
 

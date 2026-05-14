@@ -30,6 +30,9 @@ class Dataset:
         record = cur.execute(f'SELECT * FROM dataset WHERE path_on_fast_store="{str(path_on_fast_store)}"').fetchone()
         con.close()
 
+        if record is None:
+            raise ValueError(f"Dataset record not found for path_on_fast_store={path_on_fast_store}")
+
         pi_id = record[4]
         con = sqlite3.connect(DB_LOCATION)
         cur = con.cursor()
@@ -89,8 +92,7 @@ class Dataset:
 
     @classmethod
     def create(cls, file_path):
-        file_path = Path(file_path)
-        path_parts = file_path.parts
+        path_parts = Path(file_path).parts
         last_name_pattern = r"^[A-Za-z '-_]+$"
         pi_name = path_parts[4] if re.findall(last_name_pattern, path_parts[4]) else None  # TODO make it more general
         con = sqlite3.connect(DB_LOCATION)
@@ -545,9 +547,10 @@ rm -f \"$ERROR_MARKER\"
         return ims_file
 
     def move_from_acquire_to_public(self):
-        print(">>>>>>>>>>>>>>>>> move_from_acquire_to_public")
-        print("path_to_ims_file_on_hive", self.path_to_ims_file_on_hive)
-        print("path_to_ims_file_on_public_hive", self.path_to_ims_file_on_public_hive)
+        log.info(
+            f"Attempting to move Imaris file to Public for {self.pi} {self.cl_number} {self.name}: "
+            f"{self.path_to_ims_file_on_hive} -> {self.path_to_ims_file_on_public_hive}"
+        )
         failure_flag = False
         # check that ims file is on hive
         if self.path_to_ims_file_on_hive and os.path.exists(self.path_to_ims_file_on_hive):
@@ -575,12 +578,25 @@ rm -f \"$ERROR_MARKER\"
                         # create a note with where it was moved
                         with open(os.path.join(os.path.dirname(self.path_to_ims_file_on_hive), 'imaris_file_moved_to_public.txt'), 'w') as f:
                             f.write(self.path_to_ims_file_on_public_hive)
+                        log.info(
+                            f"Moved Imaris file to Public for {self.pi} {self.cl_number} {self.name}: "
+                            f"{self.path_to_ims_file_on_public_hive}"
+                        )
                 else:
+                    log.info(
+                        f"Skipping Public move for {self.pi} {self.cl_number} {self.name}: "
+                        f"destination already exists or could not be resolved ({self.path_to_ims_file_on_public_hive})"
+                    )
                     failure_flag = True
         else:
+            log.info(
+                f"Skipping Public move for {self.pi} {self.cl_number} {self.name}: "
+                f"source Imaris file missing on h20 ({self.path_to_ims_file_on_hive})"
+            )
             failure_flag = True
         # if something went wrong, send message
         if failure_flag:
+            log.error(f"Could not move Imaris file to Public for {self.pi} {self.cl_number} {self.name}")
             self.send_message('cant_make_public')
 
     def _ensure_move_job_dirs(self):
