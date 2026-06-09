@@ -142,12 +142,14 @@ def check_RSCM_imaging():
                 dataset.update_db_field('path_on_fast_store', file_path)
                 log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
                 dataset.path_on_fast_store = file_path
+                path_data = {"path": file_path}
+                json.dump(path_data, open(new_dataset_marker_json, "w"))
             else:
                 dataset = RSCMDataset.create(file_path)
                 # create .microstatus.json file in the root folder of the dataset
                 path_data = {"path": file_path}
                 json.dump(path_data, open(new_dataset_marker_json, "w"))
-                if "demo" in dataset.name.lower() or "test" in dataset.path_on_fast_store.lower():
+                if "demo" in str(dataset.name).lower() or "test" in str(dataset.path_on_fast_store).lower():
                     # demo dataset
                     log.info(f"Ignoring demo dataset {dataset}")
                     print(f"\t\t\tIgnoring demo dataset {dataset}")
@@ -244,12 +246,14 @@ def check_mesoSPIM_imaging():
                     dataset.update_db_field('path_on_fast_store', file_path)
                     log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
                     dataset.path_on_fast_store = file_path
+                    path_data = {"path": file_path}
+                    json.dump(path_data, open(new_dataset_marker_json, "w"))
                 else:
                     dataset = MesoSPIMDataset.create(file_path)
                     # create .microstatus.json file in the root folder of the dataset
                     path_data = {"path": file_path}
                     json.dump(path_data, open(new_dataset_marker_json, "w"))
-                    if "demo" in dataset.name.lower() or "test" in dataset.path_on_fast_store.lower():
+                    if "demo" in str(dataset.name).lower() or "test" in str(dataset.path_on_fast_store).lower():
                         # demo dataset
                         log.info(f"Ignoring demo dataset {dataset}")
                         print(f"Ignoring demo dataset {dataset}")
@@ -294,6 +298,14 @@ def check_mesoSPIM_imaging():
                 log.info(f"New mesoSPIM dataset at {file_path}")
                 if os.path.exists(new_dataset_marker_json):
                     print("\t\t\t>>>>>>>>>>>> renamed dataset >>>>>>>>>>>>")
+                    old_path_data = json.load(open(new_dataset_marker_json, 'r'))
+                    old_path = old_path_data['path']
+                    dataset = MesoSPIMZarrDataset(old_path)
+                    dataset.update_db_field('path_on_fast_store', file_path)
+                    log.info(f"Updated path on FastStore for renamed dataset from {old_path} to {file_path}")
+                    dataset.path_on_fast_store = file_path
+                    path_data = {"path": file_path}
+                    json.dump(path_data, open(new_dataset_marker_json, "w"))
                 else:
                     dataset = MesoSPIMZarrDataset.create(file_path)
                     # create .microstatus.json file in the root folder of the dataset
@@ -310,7 +322,8 @@ def check_mesoSPIM_imaging():
                         continue
                     dataset.send_message('imaging_started')
 
-            dataset = MesoSPIMZarrDataset(file_path)
+            if not is_new:
+                dataset = MesoSPIMZarrDataset(file_path)
             print("\t\t\t", dataset.imaging_status)
             if not os.path.exists(new_dataset_marker_json):
                 path_data = {"path": file_path}
@@ -783,6 +796,7 @@ def check_mesoSPIM_processing():
                         except:
                             print("\t\tbuilding montage")
                         try:
+                            dataset.update_imaris_file_path(final_ims_file)
                             dataset.update_processing_status('finished')
                             log.info(f"Changed processing status to finished for {dataset}")
                             dataset.send_message('processing_finished')
@@ -960,6 +974,47 @@ def check_storage():
     hive_used_percent = int(hive_used_percent_str.replace("%", ""))
     check(hive_used_percent, "hive")
     check(faststore_used_percent, "faststore")
+
+
+def cleanup_mesospim_trash():
+    today = datetime.today()
+    if today.weekday() != 6:
+        return
+
+    year, week_number, _ = today.isocalendar()
+    current_week = f"{year}-{week_number:02d}"
+    marker_path = MESOSPIM_TRASH_CLEANUP_MARKER
+
+    if os.path.exists(marker_path):
+        with open(marker_path, 'r') as f:
+            if f.read().strip() == current_week:
+                return
+
+    trash_root = MESOSPIM_FASTSTORE_TRASH_FOLDER
+    if os.path.exists(trash_root):
+        log.info(f"Cleaning up MesoSPIM trash at {trash_root}")
+        cutoff_ts = time.time() - (7 * 24 * 60 * 60)
+        for entry in os.scandir(trash_root):
+            try:
+                entry_mtime = entry.stat(follow_symlinks=False).st_mtime
+            except FileNotFoundError:
+                continue
+            if entry_mtime > cutoff_ts:
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
+                    shutil.rmtree(entry.path)
+            else:
+                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
+                    os.remove(entry.path)
+    else:
+        log.info(f"MesoSPIM trash folder does not exist: {trash_root}")
+
+    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+    with open(marker_path, 'w') as f:
+        f.write(current_week)
+
+
 def check_analysis():
     """
     If the finished dataset is a brain, send it for analysis by PEACE pipeline
@@ -1094,6 +1149,7 @@ class Found(BaseException):
 def scan():
     try:
         check_storage()
+        cleanup_mesospim_trash()
         check_RSCM_imaging()
         check_mesoSPIM_imaging()
         check_RSCM_processing()
@@ -1112,6 +1168,7 @@ def scan():
 
 def scan_debug():
     check_storage()
+    cleanup_mesospim_trash()
     check_RSCM_imaging()
     check_mesoSPIM_imaging()
     check_RSCM_processing()
