@@ -976,43 +976,70 @@ def check_storage():
     check(faststore_used_percent, "faststore")
 
 
-def cleanup_mesospim_trash():
-    today = datetime.today()
-    if today.weekday() != 6:
+def prune_empty_dirs(root_path):
+    for current_root, dirnames, filenames in os.walk(root_path, topdown=False):
+        if dirnames or filenames:
+            continue
+        if current_root == root_path:
+            continue
+        os.rmdir(current_root)
+
+
+def cleanup_faststore_trash_root(trash_root):
+    if not os.path.exists(trash_root):
+        log.info(f"FastStore trash folder does not exist: {trash_root}")
         return
 
-    year, week_number, _ = today.isocalendar()
-    current_week = f"{year}-{week_number:02d}"
-    marker_path = MESOSPIM_TRASH_CLEANUP_MARKER
+    log.info(f"Cleaning FastStore trash at {trash_root}")
+    cutoff_ts = time.time() - (TRASH_RETENTION_DAYS * 24 * 60 * 60)
+    marker_pattern = f"*{TRASH_TIMESTAMP_MARKER_SUFFIX}"
+
+    for marker_path in glob(os.path.join(trash_root, "**", marker_pattern), recursive=True):
+        trash_entry_path = marker_path[:-len(TRASH_TIMESTAMP_MARKER_SUFFIX)]
+        if not trash_entry_path.startswith(FASTSTORE_TRASH_LOCATION):
+            continue
+        if not os.path.exists(trash_entry_path):
+            try:
+                os.remove(marker_path)
+            except FileNotFoundError:
+                pass
+            continue
+
+        try:
+            marker_mtime = os.path.getmtime(marker_path)
+        except FileNotFoundError:
+            continue
+        if marker_mtime > cutoff_ts:
+            continue
+
+        if os.path.isdir(trash_entry_path):
+            shutil.rmtree(trash_entry_path)
+        else:
+            os.remove(trash_entry_path)
+
+        try:
+            os.remove(marker_path)
+        except FileNotFoundError:
+            pass
+
+    # prune_empty_dirs(trash_root)
+
+
+def cleanup_faststore_trash():
+    current_day = datetime.today().strftime("%Y-%m-%d")
+    marker_path = FASTSTORE_TRASH_CLEANUP_MARKER
 
     if os.path.exists(marker_path):
         with open(marker_path, 'r') as f:
-            if f.read().strip() == current_week:
+            if f.read().strip() == current_day:
                 return
 
-    trash_root = MESOSPIM_FASTSTORE_TRASH_FOLDER
-    if os.path.exists(trash_root):
-        log.info(f"Cleaning up MesoSPIM trash at {trash_root}")
-        cutoff_ts = time.time() - (7 * 24 * 60 * 60)
-        for entry in os.scandir(trash_root):
-            try:
-                entry_mtime = entry.stat(follow_symlinks=False).st_mtime
-            except FileNotFoundError:
-                continue
-            if entry_mtime > cutoff_ts:
-                continue
-            if entry.is_dir(follow_symlinks=False):
-                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
-                    shutil.rmtree(entry.path)
-            else:
-                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
-                    os.remove(entry.path)
-    else:
-        log.info(f"MesoSPIM trash folder does not exist: {trash_root}")
+    for trash_root in [RSCM_FASTSTORE_TRASH_FOLDER, MESOSPIM_FASTSTORE_TRASH_FOLDER]:
+        cleanup_faststore_trash_root(trash_root)
 
     os.makedirs(os.path.dirname(marker_path), exist_ok=True)
     with open(marker_path, 'w') as f:
-        f.write(current_week)
+        f.write(current_day)
 
 
 def check_analysis():
@@ -1149,7 +1176,7 @@ class Found(BaseException):
 def scan():
     try:
         check_storage()
-        cleanup_mesospim_trash()
+        cleanup_faststore_trash()
         check_RSCM_imaging()
         check_mesoSPIM_imaging()
         check_RSCM_processing()
@@ -1168,7 +1195,7 @@ def scan():
 
 def scan_debug():
     check_storage()
-    cleanup_mesospim_trash()
+    cleanup_faststore_trash()
     check_RSCM_imaging()
     check_mesoSPIM_imaging()
     check_RSCM_processing()
