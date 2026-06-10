@@ -950,9 +950,13 @@ def check_storage():
             elif warning and not warning.active:
                 warning.mark_as_active()
                 warning.send_message()
+                if storage_unit == "faststore":
+                    purge_faststore_trash()
             else:  # record doesn't exist
                 warning = Warning.create(f'low_space_{storage_unit}')
                 warning.send_message()
+                if storage_unit == "faststore":
+                    purge_faststore_trash()
         elif used_percent >= STORAGE_THRESHOLD_1:
             warning = Warning.get_from_db(f'space_{storage_unit}_thr1')
             if warning and warning.active:
@@ -1012,6 +1016,25 @@ def prune_empty_dirs(root_path):
         if current_root == root_path:
             continue
         os.rmdir(current_root)
+
+
+def purge_faststore_trash():
+    trash_root = FASTSTORE_TRASH_LOCATION
+    if not os.path.exists(trash_root):
+        log.info(f"FastStore trash folder does not exist for emergency purge: {trash_root}")
+        return
+
+    log.warning(f"Emergency purging FastStore trash at {trash_root}")
+    for entry in os.scandir(trash_root):
+        entry_path = entry.path
+        if not entry_path.startswith(f"{FASTSTORE_TRASH_LOCATION}{os.sep}"):
+            log.warning(f"Skipping emergency purge for unexpected path: {entry_path}")
+            continue
+
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry_path)
+        else:
+            os.remove(entry_path)
 
 
 def cleanup_faststore_trash_root(trash_root):

@@ -15,3 +15,5 @@
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
 - Updated `check_status.py` `check_moving()` to mark missing FastStore datasets as moved only when a Hive destination is verified, otherwise clear `moving` and pause them for follow-up.
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
+- Updated `check_status.py` to emergency-purge contents of `/CBI_FastStore/trash` once per entry into the critical FastStore space threshold, while preserving the trash root and verifying each deleted path stays under that prefix.
+- Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
