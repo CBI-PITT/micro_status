@@ -64,7 +64,7 @@ import subprocess
 import sqlite3
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from glob import glob
 from pathlib import Path, PureWindowsPath
 
@@ -1042,6 +1042,64 @@ def cleanup_faststore_trash():
         f.write(current_day)
 
 
+def move_stale_faststore_datasets():
+    current_day = datetime.today().strftime("%Y-%m-%d")
+    marker_path = STALE_ACQUIRE_MOVE_MARKER
+
+    if os.path.exists(marker_path):
+        with open(marker_path, 'r') as f:
+            if f.read().strip() == current_day:
+                return
+
+    cutoff = datetime.now() - timedelta(days=STALE_ACQUIRE_MOVE_AGE_DAYS)
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        'SELECT path_on_fast_store, created FROM dataset WHERE moved=0 AND path_on_fast_store LIKE ?',
+        (f'{FASTSTORE_ACQUISITION_FOLDER}%',)
+    ).fetchall()
+    con.close()
+
+    for dataset_path, created_str in records:
+        if not created_str:
+            continue
+
+        try:
+            created = datetime.strptime(created_str, DATETIME_FORMAT)
+        except ValueError:
+            log.warning(f"Skipping stale move check for dataset with invalid created date: {dataset_path} ({created_str})")
+            continue
+
+        if created > cutoff:
+            continue
+
+        log.info(f"Dataset older than {STALE_ACQUIRE_MOVE_AGE_DAYS} days still on FastStore Acquire: {dataset_path}")
+
+        if dataset_path.startswith(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
+            try:
+                dataset = MesoSPIMDataset(dataset_path)
+            except Exception:
+                log.warning(f"Skipping invalid MesoSPIM dataset during stale move check: {dataset_path}")
+                continue
+        elif dataset_path.startswith(RSCM_FASTSTORE_ACQUISITION_FOLDER):
+            try:
+                dataset = RSCMDataset(dataset_path)
+            except Exception:
+                log.warning(f"Skipping invalid RSCM dataset during stale move check: {dataset_path}")
+                continue
+        else:
+            continue
+
+        if dataset.moving and not dataset.moved:
+            dataset.check_if_moved()
+        elif not dataset.moving and not dataset.moved:
+            dataset.start_moving()
+
+    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+    with open(marker_path, 'w') as f:
+        f.write(current_day)
+
+
 def check_analysis():
     """
     If the finished dataset is a brain, send it for analysis by PEACE pipeline
@@ -1177,6 +1235,7 @@ def scan():
     try:
         check_storage()
         cleanup_faststore_trash()
+        move_stale_faststore_datasets()
         check_RSCM_imaging()
         check_mesoSPIM_imaging()
         check_RSCM_processing()
@@ -1196,6 +1255,7 @@ def scan():
 def scan_debug():
     check_storage()
     cleanup_faststore_trash()
+    move_stale_faststore_datasets()
     check_RSCM_imaging()
     check_mesoSPIM_imaging()
     check_RSCM_processing()

@@ -19,7 +19,9 @@ HIVE_TRASH_LOCATION = "/h20/trash"
 RSCM_FASTSTORE_TRASH_FOLDER = os.path.join(FASTSTORE_TRASH_LOCATION, "RSCM")
 MESOSPIM_FASTSTORE_TRASH_FOLDER = os.path.join(FASTSTORE_TRASH_LOCATION, "MesoSPIM")
 FASTSTORE_TRASH_CLEANUP_MARKER = "/CBI_FastStore/tmp/faststore_trash_cleanup_day.txt"
+STALE_ACQUIRE_MOVE_MARKER = "/CBI_FastStore/tmp/stale_acquire_move_day.txt"
 TRASH_RETENTION_DAYS = 3
+STALE_ACQUIRE_MOVE_AGE_DAYS = 30
 
 SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()
