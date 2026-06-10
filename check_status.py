@@ -734,9 +734,38 @@ def check_moving():
             dataset = RSCMDataset(dataset_path[0])
         else:
             continue
+
         if dataset.moving and not dataset.moved:
             dataset.check_if_moved()
-        elif not dataset.moved and not dataset.moving:
+
+        if dataset.moved:
+            continue
+
+        if not os.path.exists(dataset.path_on_fast_store):
+            verified_path_on_hive = None
+            if dataset.path_on_hive and os.path.exists(dataset.path_on_hive):
+                verified_path_on_hive = dataset.path_on_hive
+            elif os.path.exists(dataset.target_path_on_hive):
+                verified_path_on_hive = dataset.target_path_on_hive
+
+            if verified_path_on_hive:
+                if dataset.path_on_hive != verified_path_on_hive:
+                    dataset.update_path_on_hive(verified_path_on_hive)
+                dataset.update_db_field('moved', 1)
+                dataset.moved = True
+                dataset.update_db_field('moving', 0)
+                dataset.moving = False
+                dataset.update_db_field('paused', 0)
+                dataset.paused = False
+                log.info(f"Marked dataset moved after confirming Hive destination for missing FastStore source: {dataset.path_on_fast_store} -> {verified_path_on_hive}")
+            else:
+                dataset.update_db_field('moving', 0)
+                dataset.moving = False
+                dataset.mark_processing_paused()
+                log.warning(f"Paused dataset missing from FastStore Acquire with no confirmed Hive destination: {dataset.path_on_fast_store}")
+            continue
+
+        if not dataset.moving:
             dataset.start_moving()
         # elif dataset.moved and dataset.path_on_hive is not None and dataset.processing_status == 'not_started':
         #     dataset.start_processing()

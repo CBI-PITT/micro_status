@@ -13,3 +13,5 @@
 - Updated `check_status.py` to run a once-daily stale dataset move check that submits existing move jobs for any DB record older than 30 days still recorded under `/CBI_FastStore/Acquire`.
 - Updated `micro_status/settings.py` with the stale-move daily marker path and age threshold; completion messaging continues to come from the existing move-complete flow.
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
+- Updated `check_status.py` `check_moving()` to mark missing FastStore datasets as moved only when a Hive destination is verified, otherwise clear `moving` and pause them for follow-up.
+- Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
