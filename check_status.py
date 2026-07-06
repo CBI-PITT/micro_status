@@ -64,7 +64,7 @@ import subprocess
 import sqlite3
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from glob import glob
 from pathlib import Path, PureWindowsPath
 
@@ -734,9 +734,38 @@ def check_moving():
             dataset = RSCMDataset(dataset_path[0])
         else:
             continue
+
         if dataset.moving and not dataset.moved:
             dataset.check_if_moved()
-        elif not dataset.moved and not dataset.moving:
+
+        if dataset.moved:
+            continue
+
+        if not os.path.exists(dataset.path_on_fast_store):
+            verified_path_on_hive = None
+            if dataset.path_on_hive and os.path.exists(dataset.path_on_hive):
+                verified_path_on_hive = dataset.path_on_hive
+            elif os.path.exists(dataset.target_path_on_hive):
+                verified_path_on_hive = dataset.target_path_on_hive
+
+            if verified_path_on_hive:
+                if dataset.path_on_hive != verified_path_on_hive:
+                    dataset.update_path_on_hive(verified_path_on_hive)
+                dataset.update_db_field('moved', 1)
+                dataset.moved = True
+                dataset.update_db_field('moving', 0)
+                dataset.moving = False
+                dataset.update_db_field('paused', 0)
+                dataset.paused = False
+                log.info(f"Marked dataset moved after confirming Hive destination for missing FastStore source: {dataset.path_on_fast_store} -> {verified_path_on_hive}")
+            else:
+                dataset.update_db_field('moving', 0)
+                dataset.moving = False
+                dataset.mark_processing_paused()
+                log.warning(f"Paused dataset missing from FastStore Acquire with no confirmed Hive destination: {dataset.path_on_fast_store}")
+            continue
+
+        if not dataset.moving:
             dataset.start_moving()
         # elif dataset.moved and dataset.path_on_hive is not None and dataset.processing_status == 'not_started':
         #     dataset.start_processing()
@@ -921,9 +950,13 @@ def check_storage():
             elif warning and not warning.active:
                 warning.mark_as_active()
                 warning.send_message()
+                if storage_unit == "faststore":
+                    purge_faststore_trash()
             else:  # record doesn't exist
                 warning = Warning.create(f'low_space_{storage_unit}')
                 warning.send_message()
+                if storage_unit == "faststore":
+                    purge_faststore_trash()
         elif used_percent >= STORAGE_THRESHOLD_1:
             warning = Warning.get_from_db(f'space_{storage_unit}_thr1')
             if warning and warning.active:
@@ -976,43 +1009,150 @@ def check_storage():
     check(faststore_used_percent, "faststore")
 
 
-def cleanup_mesospim_trash():
-    today = datetime.today()
-    if today.weekday() != 6:
+def prune_empty_dirs(root_path):
+    for current_root, dirnames, filenames in os.walk(root_path, topdown=False):
+        if dirnames or filenames:
+            continue
+        if current_root == root_path:
+            continue
+        os.rmdir(current_root)
+
+
+def purge_faststore_trash():
+    trash_root = FASTSTORE_TRASH_LOCATION
+    if not os.path.exists(trash_root):
+        log.info(f"FastStore trash folder does not exist for emergency purge: {trash_root}")
         return
 
-    year, week_number, _ = today.isocalendar()
-    current_week = f"{year}-{week_number:02d}"
-    marker_path = MESOSPIM_TRASH_CLEANUP_MARKER
+    log.warning(f"Emergency purging FastStore trash at {trash_root}")
+    for entry in os.scandir(trash_root):
+        entry_path = entry.path
+        if not entry_path.startswith(f"{FASTSTORE_TRASH_LOCATION}{os.sep}"):
+            log.warning(f"Skipping emergency purge for unexpected path: {entry_path}")
+            continue
+
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry_path)
+            log.info(f"Removed folder: {entry_path}")
+        else:
+            os.remove(entry_path)
+            # log.info(f"Removed file: {entry_path}")
+
+
+def cleanup_faststore_trash_root(trash_root):
+    if not os.path.exists(trash_root):
+        log.info(f"FastStore trash folder does not exist: {trash_root}")
+        return
+
+    log.info(f"Cleaning FastStore trash at {trash_root}")
+    cutoff_ts = time.time() - (TRASH_RETENTION_DAYS * 24 * 60 * 60)
+    marker_pattern = f"*{TRASH_TIMESTAMP_MARKER_SUFFIX}"
+
+    for marker_path in glob(os.path.join(trash_root, "**", marker_pattern), recursive=True):
+        trash_entry_path = marker_path[:-len(TRASH_TIMESTAMP_MARKER_SUFFIX)]
+        if not trash_entry_path.startswith(FASTSTORE_TRASH_LOCATION):
+            continue
+        if not os.path.exists(trash_entry_path):
+            try:
+                os.remove(marker_path)
+            except FileNotFoundError:
+                pass
+            continue
+
+        try:
+            marker_mtime = os.path.getmtime(marker_path)
+        except FileNotFoundError:
+            continue
+        if marker_mtime > cutoff_ts:
+            continue
+
+        if os.path.isdir(trash_entry_path):
+            shutil.rmtree(trash_entry_path)
+            log.info(f"Removed folder: {trash_entry_path}")
+        else:
+            os.remove(trash_entry_path)
+
+        try:
+            os.remove(marker_path)
+        except FileNotFoundError:
+            pass
+
+    # prune_empty_dirs(trash_root)
+
+
+def cleanup_faststore_trash():
+    current_day = datetime.today().strftime("%Y-%m-%d")
+    marker_path = FASTSTORE_TRASH_CLEANUP_MARKER
 
     if os.path.exists(marker_path):
         with open(marker_path, 'r') as f:
-            if f.read().strip() == current_week:
+            if f.read().strip() == current_day:
                 return
 
-    trash_root = MESOSPIM_FASTSTORE_TRASH_FOLDER
-    if os.path.exists(trash_root):
-        log.info(f"Cleaning up MesoSPIM trash at {trash_root}")
-        cutoff_ts = time.time() - (7 * 24 * 60 * 60)
-        for entry in os.scandir(trash_root):
-            try:
-                entry_mtime = entry.stat(follow_symlinks=False).st_mtime
-            except FileNotFoundError:
-                continue
-            if entry_mtime > cutoff_ts:
-                continue
-            if entry.is_dir(follow_symlinks=False):
-                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
-                    shutil.rmtree(entry.path)
-            else:
-                if entry.path.startswith(FASTSTORE_TRASH_LOCATION):
-                    os.remove(entry.path)
-    else:
-        log.info(f"MesoSPIM trash folder does not exist: {trash_root}")
+    for trash_root in [RSCM_FASTSTORE_TRASH_FOLDER, MESOSPIM_FASTSTORE_TRASH_FOLDER]:
+        cleanup_faststore_trash_root(trash_root)
 
     os.makedirs(os.path.dirname(marker_path), exist_ok=True)
     with open(marker_path, 'w') as f:
-        f.write(current_week)
+        f.write(current_day)
+
+
+def move_stale_faststore_datasets():
+    current_day = datetime.today().strftime("%Y-%m-%d")
+    marker_path = STALE_ACQUIRE_MOVE_MARKER
+
+    if os.path.exists(marker_path):
+        with open(marker_path, 'r') as f:
+            if f.read().strip() == current_day:
+                return
+
+    cutoff = datetime.now() - timedelta(days=STALE_ACQUIRE_MOVE_AGE_DAYS)
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        'SELECT path_on_fast_store, created FROM dataset WHERE moved=0 AND path_on_fast_store LIKE ?',
+        (f'{FASTSTORE_ACQUISITION_FOLDER}%',)
+    ).fetchall()
+    con.close()
+
+    for dataset_path, created_str in records:
+        if not created_str:
+            continue
+
+        try:
+            created = datetime.strptime(created_str, DATETIME_FORMAT)
+        except ValueError:
+            log.warning(f"Skipping stale move check for dataset with invalid created date: {dataset_path} ({created_str})")
+            continue
+
+        if created > cutoff:
+            continue
+
+        log.info(f"Dataset older than {STALE_ACQUIRE_MOVE_AGE_DAYS} days still on FastStore Acquire: {dataset_path}")
+
+        if dataset_path.startswith(MESOSPIM_FASTSTORE_ACQUISITION_FOLDER):
+            try:
+                dataset = MesoSPIMDataset(dataset_path)
+            except Exception:
+                log.warning(f"Skipping invalid MesoSPIM dataset during stale move check: {dataset_path}")
+                continue
+        elif dataset_path.startswith(RSCM_FASTSTORE_ACQUISITION_FOLDER):
+            try:
+                dataset = RSCMDataset(dataset_path)
+            except Exception:
+                log.warning(f"Skipping invalid RSCM dataset during stale move check: {dataset_path}")
+                continue
+        else:
+            continue
+
+        if dataset.moving and not dataset.moved:
+            dataset.check_if_moved()
+        elif not dataset.moving and not dataset.moved:
+            dataset.start_moving()
+
+    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+    with open(marker_path, 'w') as f:
+        f.write(current_day)
 
 
 def check_analysis():
@@ -1149,7 +1289,8 @@ class Found(BaseException):
 def scan():
     try:
         check_storage()
-        cleanup_mesospim_trash()
+        cleanup_faststore_trash()
+        move_stale_faststore_datasets()
         check_RSCM_imaging()
         check_mesoSPIM_imaging()
         check_RSCM_processing()
@@ -1168,7 +1309,8 @@ def scan():
 
 def scan_debug():
     check_storage()
-    cleanup_mesospim_trash()
+    cleanup_faststore_trash()
+    move_stale_faststore_datasets()
     check_RSCM_imaging()
     check_mesoSPIM_imaging()
     check_RSCM_processing()

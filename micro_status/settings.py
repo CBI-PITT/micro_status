@@ -14,10 +14,14 @@ RSCM_HIVE_ACQUISITION_FOLDER = "/h20/Acquire/RSCM"
 MESOSPIM_HIVE_ACQUISITION_FOLDER = "/h20/Acquire/MesoSPIM"
 DB_LOCATION = "/CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db"
 DB_BACKUPS_DIR = "/CBI_FastStore/Iana/db_backups"
-FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash"
-HIVE_TRASH_LOCATION = "/h20/trash"
+FASTSTORE_TRASH_LOCATION = "/CBI_FastStore/trash/autodelete"
+HIVE_TRASH_LOCATION = "/h20/trash/autodelete"
+RSCM_FASTSTORE_TRASH_FOLDER = os.path.join(FASTSTORE_TRASH_LOCATION, "RSCM")
 MESOSPIM_FASTSTORE_TRASH_FOLDER = os.path.join(FASTSTORE_TRASH_LOCATION, "MesoSPIM")
-MESOSPIM_TRASH_CLEANUP_MARKER = "/CBI_FastStore/tmp/mesospim_trash_cleanup_week.txt"
+FASTSTORE_TRASH_CLEANUP_MARKER = "/CBI_FastStore/tmp/faststore_trash_cleanup_day.txt"
+STALE_ACQUIRE_MOVE_MARKER = "/CBI_FastStore/tmp/stale_acquire_move_day.txt"
+TRASH_RETENTION_DAYS = 3
+STALE_ACQUIRE_MOVE_AGE_DAYS = 30
 
 SLACK_URL = "https://slack.com/api/chat.postMessage"
 load_dotenv()
@@ -65,3 +69,4 @@ MOVE_TIMES = {'start': 17, 'stop': 6}
 MESOSPIM_AUTO_STITCH_FOLDER = "/CBI_FastStore/tmp/stitch_jobs"
 MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 NEW_DATASET_MARKER_FILENAME = ".microstatus.json"
+TRASH_TIMESTAMP_MARKER_SUFFIX = ".trash_moved_at"

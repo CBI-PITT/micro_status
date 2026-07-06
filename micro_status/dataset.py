@@ -372,6 +372,7 @@ set -euo pipefail
 SRC={shlex.quote(src_path)}
 BASE_DST={shlex.quote(dst_path)}
 TRASH={shlex.quote(trash_path)}
+TRASH_MARKER={shlex.quote(self.trash_timestamp_marker_path)}
 COMPLETE_MARKER={shlex.quote(self.move_complete_marker)}
 ERROR_MARKER={shlex.quote(self.move_error_marker)}
 
@@ -397,6 +398,7 @@ mkdir -p \"$(dirname \"$DST\")\" \"$(dirname \"$TRASH\")\" \"$(dirname \"$COMPLE
 rclone copy \"$SRC\" \"$DST\" --progress --transfers=4 --checkers=8 --size-only --fast-list
 rclone check \"$SRC\" \"$DST\" --size-only
 mv \"$SRC\" \"$TRASH\"
+touch \"$TRASH_MARKER\"
 printf '%s\n' \"$DST\" > \"$COMPLETE_MARKER\"
 rm -f \"$ERROR_MARKER\"
 """
@@ -666,6 +668,16 @@ rm -f \"$ERROR_MARKER\"
             relative_path = os.path.relpath(source_path, HIVE_ACQUISITION_FOLDER)
             return os.path.join(HIVE_TRASH_LOCATION, relative_path)
         return None
+
+    @property
+    def trash_timestamp_marker_path(self):
+        return f"{self.target_path_in_trash}{TRASH_TIMESTAMP_MARKER_SUFFIX}"
+
+    def touch_faststore_trash_marker(self):
+        marker_path = self.trash_timestamp_marker_path
+        os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+        with open(marker_path, "a"):
+            os.utime(marker_path, None)
 
 class Found(BaseException):
     pass
