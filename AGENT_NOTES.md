@@ -17,3 +17,5 @@
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
 - Updated `check_status.py` to emergency-purge contents of `/CBI_FastStore/trash` once per entry into the critical FastStore space threshold, while preserving the trash root and verifying each deleted path stays under that prefix.
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
+- Updated `micro_status/settings.py` and `micro_status/local_settings.py` to move FastStore and Hive trash roots under `trash/autodelete`, preserving derived `RSCM` and `MesoSPIM` subpaths and existing cleanup behavior.
+- Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.

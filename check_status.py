@@ -1033,8 +1033,10 @@ def purge_faststore_trash():
 
         if entry.is_dir(follow_symlinks=False):
             shutil.rmtree(entry_path)
+            log.info(f"Removed folder: {entry_path}")
         else:
             os.remove(entry_path)
+            # log.info(f"Removed file: {entry_path}")
 
 
 def cleanup_faststore_trash_root(trash_root):
@@ -1066,6 +1068,7 @@ def cleanup_faststore_trash_root(trash_root):
 
         if os.path.isdir(trash_entry_path):
             shutil.rmtree(trash_entry_path)
+            log.info(f"Removed folder: {trash_entry_path}")
         else:
             os.remove(trash_entry_path)
 
