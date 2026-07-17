@@ -553,43 +553,41 @@ rm -f \"$ERROR_MARKER\"
             f"Attempting to move Imaris file to Public for {self.pi} {self.cl_number} {self.name}: "
             f"{self.path_to_ims_file_on_hive} -> {self.path_to_ims_file_on_public_hive}"
         )
+        time.sleep(60)
         failure_flag = False
         # check that ims file is on hive
         if self.path_to_ims_file_on_hive and os.path.exists(self.path_to_ims_file_on_hive):
-            try:
-                # check that it opens (copying finished)
-                f = ims(self.path_to_ims_file_on_hive)
-            except:
-                failure_flag = True
-            else:
-                # check that destination file doesn't exist
-                if self.path_to_ims_file_on_public_hive and not os.path.exists(self.path_to_ims_file_on_public_hive):
+            # check that destination file doesn't exist
+            if self.path_to_ims_file_on_public_hive and not os.path.exists(self.path_to_ims_file_on_public_hive):
+                try:
+                    os.makedirs(os.path.dirname(self.path_to_ims_file_on_public_hive), exist_ok=True)
+                    # shutil.move(self.path_to_ims_file_on_hive, self.path_to_ims_file_on_public_hive)
+                    cmd = ['mv', self.path_to_ims_file_on_hive, self.path_to_ims_file_on_public_hive]
+                    subprocess.run(cmd)
+                except:
+                    import traceback
+                    log.error(traceback.format_exc())
+                    failure_flag = True
+                else:
                     try:
-                        if not os.path.exists(os.path.dirname(self.path_to_ims_file_on_public_hive)):
-                            os.makedirs(os.path.dirname(self.path_to_ims_file_on_public_hive))
-                        # shutil.move(self.path_to_ims_file_on_hive, self.path_to_ims_file_on_public_hive)
-                        cmd = ['mv', self.path_to_ims_file_on_hive, self.path_to_ims_file_on_public_hive]
-                        subprocess.run(cmd)
+                        time.sleep(30)
+                        f = ims(self.path_to_ims_file_on_public_hive)
                     except:
                         failure_flag = True
-                    else:
-                        try:
-                            f = ims(self.path_to_ims_file_on_public_hive)
-                        except:
-                            failure_flag = True
                         # create a note with where it was moved
+                    else:
                         with open(os.path.join(os.path.dirname(self.path_to_ims_file_on_hive), 'imaris_file_moved_to_public.txt'), 'w') as f:
                             f.write(self.path_to_ims_file_on_public_hive)
                         log.info(
                             f"Moved Imaris file to Public for {self.pi} {self.cl_number} {self.name}: "
                             f"{self.path_to_ims_file_on_public_hive}"
                         )
-                else:
-                    log.info(
-                        f"Skipping Public move for {self.pi} {self.cl_number} {self.name}: "
-                        f"destination already exists or could not be resolved ({self.path_to_ims_file_on_public_hive})"
-                    )
-                    failure_flag = True
+            else:
+                log.info(
+                    f"Skipping Public move for {self.pi} {self.cl_number} {self.name}: "
+                    f"destination already exists or could not be resolved ({self.path_to_ims_file_on_public_hive})"
+                )
+                failure_flag = True
         else:
             log.info(
                 f"Skipping Public move for {self.pi} {self.cl_number} {self.name}: "

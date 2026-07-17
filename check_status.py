@@ -486,13 +486,14 @@ def check_RSCM_processing():
     ).fetchall()
     if records:  # there's something to be denoised
         if not job_in_queue('lab', 'CBPy'):
-            log.info("!!!!!!!!!!!!!!!!! Launching CBPY !!!!!!!!!!!!!!!!!!")
+            # log.info("!!!!!!!!!!!!!!!!! Launching CBPY !!!!!!!!!!!!!!!!!!")
             script_name = '/h20/home/lab/scripts/run_cbpy.sh'
             result = subprocess.run(["sbatch", script_name], text=True, capture_output=True)
     else:
         if job_in_queue('lab', 'CBPy'):
             if not len(glob("/CBI_FastStore/clusterPy/active/*.xml")) and not len(glob("/CBI_FastStore/clusterPy/queueGPU/*.xml")):
-                log.info("!!!!!!!!!!!!!!!!! Stopping CBPY !!!!!!!!!!!!!!!!!!")
+                # log.info("!!!!!!!!!!!!!!!!! Stopping CBPY !!!!!!!!!!!!!!!!!!")
+                pass
                 # list_and_kill_jobs('lab', "CBPy")
 
     for dataset_path in records:
@@ -1117,6 +1118,8 @@ def move_stale_faststore_datasets():
 
     for dataset_path, created_str in records:
         if not created_str:
+            continue
+        if not os.path.exists(dataset_path):
             continue
 
         try:
