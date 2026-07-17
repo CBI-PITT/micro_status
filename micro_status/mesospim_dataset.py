@@ -356,14 +356,14 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
                             continue
                         os.makedirs(os.path.dirname(trash_path), exist_ok=True)
                         shutil.move(f, trash_path)
-                        self.touch_faststore_trash_marker()
+                        self.touch_trash_marker(trash_path)
                     for f in ome_zarr_dirs:
                         trash_path = self.target_cleanup_path_in_trash(f)
                         if not trash_path:
                             continue
                         os.makedirs(os.path.dirname(trash_path), exist_ok=True)
                         shutil.move(f, trash_path)
-                        self.touch_faststore_trash_marker()
+                        self.touch_trash_marker(trash_path)
 
     @property
     def final_imaris_search_dir(self):

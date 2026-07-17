@@ -236,7 +236,7 @@ class RSCMDataset(Dataset):
                 continue
             os.makedirs(os.path.dirname(trash_path), exist_ok=True)
             shutil.move(f, trash_path)
-            self.touch_faststore_trash_marker()
+            self.touch_trash_marker(trash_path)
 
     def clean_up_denoised_composites(self):
         log.info(f"Cleaning up denoised composites at {self.job_dir}")
@@ -250,7 +250,7 @@ class RSCMDataset(Dataset):
                 continue
             os.makedirs(os.path.dirname(trash_path), exist_ok=True)
             shutil.move(f, trash_path)
-            self.touch_faststore_trash_marker()
+            self.touch_trash_marker(trash_path)
 
     def update_job_number(self, job_number):
         con = sqlite3.connect(DB_LOCATION)

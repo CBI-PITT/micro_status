@@ -1098,6 +1098,92 @@ def cleanup_faststore_trash():
         f.write(current_day)
 
 
+def delete_hive_trash_entry(trash_entry_path):
+    if not trash_entry_path.startswith(HIVE_TRASH_LOCATION):
+        log.warning(f"Skipping Hive trash deletion for unexpected path: {trash_entry_path}")
+        return False
+
+    if os.path.isdir(trash_entry_path):
+        for current_root, dirnames, filenames in os.walk(trash_entry_path, topdown=False):
+            for filename in filenames:
+                file_path = os.path.join(current_root, filename)
+                if not file_path.startswith(HIVE_TRASH_LOCATION):
+                    log.warning(f"Skipping Hive trash file outside root: {file_path}")
+                    continue
+                log.info(f"Deleting Hive trash file: {file_path}")
+                os.remove(file_path)
+
+            for dirname in dirnames:
+                dir_path = os.path.join(current_root, dirname)
+                if not dir_path.startswith(HIVE_TRASH_LOCATION):
+                    log.warning(f"Skipping Hive trash subfolder outside root: {dir_path}")
+                    continue
+                log.info(f"Deleting Hive trash subfolder: {dir_path}")
+                os.rmdir(dir_path)
+
+        log.info(f"Deleting Hive trash folder: {trash_entry_path}")
+        os.rmdir(trash_entry_path)
+        return True
+
+    log.info(f"Deleting Hive trash file: {trash_entry_path}")
+    os.remove(trash_entry_path)
+    return True
+
+
+def cleanup_hive_trash_root(trash_root):
+    if not os.path.exists(trash_root):
+        log.info(f"Hive trash folder does not exist: {trash_root}")
+        return
+
+    log.info(f"Cleaning Hive trash at {trash_root}")
+    cutoff_ts = time.time() - (TRASH_RETENTION_DAYS * 24 * 60 * 60)
+    marker_pattern = f"*{TRASH_TIMESTAMP_MARKER_SUFFIX}"
+
+    for marker_path in glob(os.path.join(trash_root, "**", marker_pattern), recursive=True):
+        trash_entry_path = marker_path[:-len(TRASH_TIMESTAMP_MARKER_SUFFIX)]
+        if not trash_entry_path.startswith(HIVE_TRASH_LOCATION):
+            log.warning(f"Skipping Hive trash marker outside root: {marker_path}")
+            continue
+        if not os.path.exists(trash_entry_path):
+            try:
+                log.info(f"Deleting stale Hive trash marker: {marker_path}")
+                os.remove(marker_path)
+            except FileNotFoundError:
+                pass
+            continue
+
+        try:
+            marker_mtime = os.path.getmtime(marker_path)
+        except FileNotFoundError:
+            continue
+        if marker_mtime > cutoff_ts:
+            continue
+
+        if delete_hive_trash_entry(trash_entry_path):
+            try:
+                log.info(f"Deleting Hive trash marker: {marker_path}")
+                os.remove(marker_path)
+            except FileNotFoundError:
+                pass
+
+
+def cleanup_hive_trash():
+    current_day = datetime.today().strftime("%Y-%m-%d")
+    marker_path = HIVE_TRASH_CLEANUP_MARKER
+
+    if os.path.exists(marker_path):
+        with open(marker_path, 'r') as f:
+            if f.read().strip() == current_day:
+                return
+
+    for trash_root in [RSCM_HIVE_TRASH_FOLDER, MESOSPIM_HIVE_TRASH_FOLDER]:
+        cleanup_hive_trash_root(trash_root)
+
+    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+    with open(marker_path, 'w') as f:
+        f.write(current_day)
+
+
 def move_stale_faststore_datasets():
     current_day = datetime.today().strftime("%Y-%m-%d")
     marker_path = STALE_ACQUIRE_MOVE_MARKER
@@ -1293,6 +1379,7 @@ def scan():
     try:
         check_storage()
         cleanup_faststore_trash()
+        cleanup_hive_trash()
         move_stale_faststore_datasets()
         check_RSCM_imaging()
         check_mesoSPIM_imaging()
@@ -1313,6 +1400,7 @@ def scan():
 def scan_debug():
     check_storage()
     cleanup_faststore_trash()
+    cleanup_hive_trash()
     move_stale_faststore_datasets()
     check_RSCM_imaging()
     check_mesoSPIM_imaging()

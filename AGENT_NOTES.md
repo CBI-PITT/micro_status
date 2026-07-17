@@ -19,3 +19,6 @@
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
 - Updated `micro_status/settings.py` and `micro_status/local_settings.py` to move FastStore and Hive trash roots under `trash/autodelete`, preserving derived `RSCM` and `MesoSPIM` subpaths and existing cleanup behavior.
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
+- Updated `micro_status/dataset.py`, `micro_status/rscm_dataset.py`, and `micro_status/mesospim_dataset.py` so Hive-targeted cleanup moves create timestamp markers for the exact `/h20/trash/autodelete/...` destination path.
+- Updated `check_status.py`, `micro_status/settings.py`, and `micro_status/local_settings.py` with a separate once-daily Hive trash cleanup pass, explicit `HIVE_TRASH_LOCATION` deletion guards, and per-file/per-folder/per-marker logging for Hive trash deletions.
+- Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.

@@ -671,8 +671,14 @@ rm -f \"$ERROR_MARKER\"
     def trash_timestamp_marker_path(self):
         return f"{self.target_path_in_trash}{TRASH_TIMESTAMP_MARKER_SUFFIX}"
 
+    def trash_timestamp_marker_for_path(self, trash_path):
+        return f"{trash_path}{TRASH_TIMESTAMP_MARKER_SUFFIX}"
+
     def touch_faststore_trash_marker(self):
-        marker_path = self.trash_timestamp_marker_path
+        self.touch_trash_marker(self.target_path_in_trash)
+
+    def touch_trash_marker(self, trash_path):
+        marker_path = self.trash_timestamp_marker_for_path(trash_path)
         os.makedirs(os.path.dirname(marker_path), exist_ok=True)
         with open(marker_path, "a"):
             os.utime(marker_path, None)
