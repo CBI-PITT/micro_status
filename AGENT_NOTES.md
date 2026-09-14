@@ -19,3 +19,11 @@
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
 - Updated `micro_status/settings.py` and `micro_status/local_settings.py` to move FastStore and Hive trash roots under `trash/autodelete`, preserving derived `RSCM` and `MesoSPIM` subpaths and existing cleanup behavior.
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
+
+2026-09-11
+- Added `instrument_id` tracking for MesoSPIM datasets: `micro_status/mesospim_dataset.py` now parses `[instrument_id]` from the `[MICROSCOPE PARAMETERS]` section of metadata files and writes it to the DB in `_specific_setup` (new datasets only).
+- Added a commented one-time `ALTER TABLE dataset ADD COLUMN instrument_id TEXT` block to `create_db.py` (must be uncommented and run once against `/CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db` before the DB write works).
+- Updated `micro_status/dataset.py` to add a `self.instrument_id = None` default in `Dataset.__init__` and append `Microscope: <instrument_id>` to Slack imaging messages (`imaging_started`, `imaging_finished`, `imaging_paused`) when set; RSCM and other messages unchanged.
+- Parser sanity-checked against a live MesoSPIM metadata file (returns `mesoSPIM 1`).
+- Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
+- Follow-up: run the `ALTER TABLE` migration once; existing DB rows will not be backfilled (per decision).
