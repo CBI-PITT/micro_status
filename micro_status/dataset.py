@@ -86,6 +86,7 @@ class Dataset:
         self.moving = record[33]
         self.paused = record[34]
         self.public = record[35]
+        self.instrument_id = None
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"
@@ -213,6 +214,8 @@ class Dataset:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, ims_folder)
         else:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name)
+        if msg_type in ('imaging_started', 'imaging_finished', 'imaging_paused') and self.instrument_id:
+            msg_text += f" on {self.instrument_id}"
         log.info(f"Message text: {msg_text}")
         payload = {
             "channel": SLACK_CHANNEL_ID,

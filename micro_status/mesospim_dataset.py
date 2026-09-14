@@ -20,6 +20,7 @@ class MesoSPIMDataset(Dataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.refractive_index = None
+        self.instrument_id = None
         if os.path.exists(self.path_on_fast_store):
             self.path = self.path_on_fast_store
         elif self.path_on_hive and os.path.exists(self.path_on_hive):
@@ -48,6 +49,12 @@ class MesoSPIMDataset(Dataset):
                 if ri_value:
                     self.refractive_index = float(ri_value[0])
 
+            instrument = [l for l in lines if "[instrument_id]" in l]
+            if instrument:
+                instrument_id_match = re.search(r"\[instrument_id\]\s*(.+)", instrument[0])
+                if instrument_id_match:
+                    self.instrument_id = instrument_id_match.group(1).strip()
+
         channels = self.get_total_MesoSPIM_colors_from_file_list()
         if channels:
             self.channels = channels
@@ -75,6 +82,16 @@ class MesoSPIMDataset(Dataset):
             con.commit()
             con.close()
             # log.info(f"Channels: {self.channels}, Tiles: {self.tiles_total}")
+
+        if self.instrument_id:
+            con = sqlite3.connect(DB_LOCATION)
+            cur = con.cursor()
+            res = cur.execute(
+                f'UPDATE dataset SET instrument_id = "{self.instrument_id}" WHERE id={self.db_id}'
+            )
+            con.commit()
+            con.close()
+            # log.info(f"Instrument id {self.instrument_id}")
         # log.info(f"Refractive index {self.refractive_index}")
         # log.info(f"Resolution (XY) {self.resolution_xy}, resolution (Z) {self.resolution_z}")
 

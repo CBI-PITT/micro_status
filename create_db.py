@@ -223,6 +223,28 @@ connection = sqlite3.connect(db_file)
 #     connection.close()
 
 
+# ### Add instrument_id column (run once, then re-comment)
+# ### ALTER TABLE dataset ADD COLUMN instrument_id TEXT
+# try:
+#     # Create a cursor object
+#     cursor = connection.cursor()
+#
+#     # Define the SQL command to add the column
+#     add_column_query = """
+#     ALTER TABLE dataset
+#     ADD COLUMN instrument_id TEXT
+#     """
+#     # Execute the SQL command
+#     cursor.execute(add_column_query)
+#     print("Column 'instrument_id' added successfully to the 'dataset' table.")
+#
+# except sqlite3.Error as e:
+#     print(f"An error occurred: {e}")
+# finally:
+#     # Close the connection
+#     connection.close()
+
+
 # ### Add columns to table
 # try:
 #     # Create a cursor object
