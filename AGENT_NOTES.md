@@ -27,3 +27,14 @@
 - Parser sanity-checked against a live MesoSPIM metadata file (returns `mesoSPIM 1`).
 - Validation: `python3 -m compileall check_status.py create_db.py populate_db.py cleanup_db.py micro_status` succeeded.
 - Follow-up: run the `ALTER TABLE` migration once; existing DB rows will not be backfilled (per decision).
+
+2026-09-15
+- Added MesoSPIM usage posting to the online scheduler (scheduler.cbi.pitt.edu/cbi_logger.php), mirroring the timeLogs repo payload format.
+- New module `micro_status/scheduler_report.py`: parses `[Started taking images]`/`[Stopped taking images]` (`%Y%m%d-%H%M%S`) from tile metadata files (min/max across files), builds a timeLogs-style payload (`RECORD_ID` = start `%Y%m%d%H%M%S` + zero-padded db id, `LABUSER` = path user, `MACHINENAME` = instrument_id, `START`/`END` = `YYYYMMDD-<30-min slot>` with same-slot push), POSTs with basic auth, writes timeLogs-style transmit logs, emails on failure (once per dataset via `scheduler_notified`).
+- Ran one-time DB migration against `/CBI_FastStore/Iana/RSCM_MesoSPIM_datasets.db`: added `imaging_start`, `imaging_end`, `scheduler_posted`, `scheduler_record_id`, `scheduler_notified` (dataset columns 37-41); commented "run once" block added to `create_db.py` matching existing convention.
+- Updated `micro_status/dataset.py` `__init__` to read the new columns positionally (37-41).
+- Updated `check_status.py` `check_mesoSPIM_imaging()`: posts usage when `imaging_status == "finished"` and `scheduler_posted == 0` (btf + zarr loops); retries every scan until POST succeeds; demo/test datasets skipped.
+- Updated `micro_status/settings.py`: `SCHEDULER_URL`, `SCHEDULER_LOG_DIR` (`/CBI_FastStore/Iana/scheduler_transmit_logs`), `SCHEDULER_POSTING_ENABLED = False` (flip on after validation), `SCHEDULER_POST_TEST_FAIL` spoof flag.
+- Appended scheduler/email placeholder keys to `.env` (gitignored): `SCHEDULER_USER`, `SCHEDULER_PASS`, `SCHEDULER_EMAIL_SENDER`, `SCHEDULER_EMAIL_PASSWORD`, `SCHEDULER_EMAIL_RECIPIENTS`. NOTE: real credentials are NOT in the timeLogs repo (only empty `settings_TEMPLATE.ini`); user must fill `SCHEDULER_USER`/`SCHEDULER_PASS`/`SCHEDULER_EMAIL_PASSWORD` before enabling.
+- Validation: `python3 -m compileall ...` succeeded; read-only test against a live metadata folder (`delima-s/5CL18/091426_2`, 40 metas) parsed start 2026-09-14 14:39:12 / end 19:02:56; payload, same-slot push, cross-midnight, disabled path and spoof-fail transmit-log/email-guard path verified with sandboxed log dir (no real POST, no DB writes).
+- Follow-ups: fill `.env` credentials; set `SCHEDULER_POSTING_ENABLED = True`; confirm that path usernames and instrument_id resolve in the scheduler.
