@@ -76,6 +76,7 @@ from imaris_ims_file_reader import ims
 from micro_status.dataset import Dataset
 from micro_status.mesospim_dataset import MesoSPIMDataset, MesoSPIMZarrDataset
 from micro_status.rscm_dataset import RSCMDataset
+from micro_status.scheduler_report import post_mesospim_usage
 from micro_status.settings import *  # TODO replace this with normal import
 from micro_status.warning import Warning
 from micro_status.utils import can_be_moved
@@ -269,6 +270,10 @@ def check_mesoSPIM_imaging():
             if not os.path.exists(new_dataset_marker_json):
                 path_data = {"path": file_path}
                 json.dump(path_data, open(new_dataset_marker_json, "w"))
+            # Post MesoSPIM usage to the online scheduler once imaging finished;
+            # safe to call on every scan, retries until the POST succeeds
+            if dataset.imaging_status == "finished" and not dataset.scheduler_posted:
+                post_mesospim_usage(dataset)
             # check whether imaging finished or paused
             if dataset.imaging_status == 'in_progress':
                 dataset.check_imaging_progress()
@@ -328,6 +333,10 @@ def check_mesoSPIM_imaging():
             if not os.path.exists(new_dataset_marker_json):
                 path_data = {"path": file_path}
                 json.dump(path_data, open(new_dataset_marker_json, "w"))
+            # Post MesoSPIM usage to the online scheduler once imaging finished;
+            # safe to call on every scan, retries until the POST succeeds
+            if dataset.imaging_status == "finished" and not dataset.scheduler_posted:
+                post_mesospim_usage(dataset)
             if dataset.imaging_status == 'in_progress':
                 dataset.check_imaging_progress()
         except Exception:

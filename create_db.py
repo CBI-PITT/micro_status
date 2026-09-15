@@ -223,6 +223,35 @@ connection = sqlite3.connect(db_file)
 #     connection.close()
 
 
+# ### Add scheduler posting columns (run once, then re-comment)
+# ### ALTER TABLE dataset ADD COLUMN imaging_start TEXT
+# ### ALTER TABLE dataset ADD COLUMN imaging_end TEXT
+# ### ALTER TABLE dataset ADD COLUMN scheduler_posted INTEGER DEFAULT 0
+# ### ALTER TABLE dataset ADD COLUMN scheduler_record_id TEXT
+# ### ALTER TABLE dataset ADD COLUMN scheduler_notified INTEGER DEFAULT 0
+# try:
+#     # Create a cursor object
+#     cursor = connection.cursor()
+#
+#     # Define the SQL commands to add the columns
+#     add_column_queries = """
+#     ALTER TABLE dataset ADD COLUMN imaging_start TEXT;
+#     ALTER TABLE dataset ADD COLUMN imaging_end TEXT;
+#     ALTER TABLE dataset ADD COLUMN scheduler_posted INTEGER DEFAULT 0;
+#     ALTER TABLE dataset ADD COLUMN scheduler_record_id TEXT;
+#     ALTER TABLE dataset ADD COLUMN scheduler_notified INTEGER DEFAULT 0;
+#     """
+#     # Execute the SQL commands
+#     cursor.executescript(add_column_queries)
+#     print("Columns 'imaging_start', 'imaging_end', 'scheduler_posted', 'scheduler_record_id', 'scheduler_notified' added to the 'dataset' table.")
+#
+# except sqlite3.Error as e:
+#     print(f"An error occurred: {e}")
+# finally:
+#     # Close the connection
+#     connection.close()
+
+
 # ### Add instrument_id column (run once, then re-comment)
 # ### ALTER TABLE dataset ADD COLUMN instrument_id TEXT
 # try:

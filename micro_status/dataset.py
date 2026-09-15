@@ -87,6 +87,11 @@ class Dataset:
         self.paused = record[34]
         self.public = record[35]
         self.instrument_id = None
+        self.imaging_start = record[37]
+        self.imaging_end = record[38]
+        self.scheduler_posted = record[39]
+        self.scheduler_record_id = record[40]
+        self.scheduler_notified = record[41]
 
     def __str__(self):
         return f"{self.db_id} {self.pi} {self.cl_number} {self.name}"

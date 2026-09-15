@@ -70,3 +70,13 @@ MESOSPIM_AUTO_STITCH_FOLDER = "/CBI_FastStore/tmp/stitch_jobs"
 MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 NEW_DATASET_MARKER_FILENAME = ".microstatus.json"
 TRASH_TIMESTAMP_MARKER_SUFFIX = ".trash_moved_at"
+
+# Online scheduler (scheduler.cbi.pitt.edu) usage posting for MesoSPIM.
+# Credentials (SCHEDULER_USER, SCHEDULER_PASS, SCHEDULER_EMAIL_PASSWORD) are
+# read from .env. Set SCHEDULER_POSTING_ENABLED = True after validating.
+SCHEDULER_URL = "https://scheduler.cbi.pitt.edu/cbi_logger.php"
+SCHEDULER_LOG_DIR = "/CBI_FastStore/Iana/scheduler_transmit_logs"
+SCHEDULER_POSTING_ENABLED = False
+# Set to any value to spoof a failed transmit and test the error log and
+# email path without contacting the scheduler (like timeLogs' fail_transmit)
+SCHEDULER_POST_TEST_FAIL = None
