@@ -207,7 +207,8 @@ class Dataset:
             'requeue_ims': "Requeuing ims build task for {} {} {}",
             'peace_json_created': "Created analysis task for brain dataset {} {} {}",
             'moved': "Dataset {} {} {} has been moved to h20",
-            'cant_make_public': "Dataset {} {} {} could NOT be moved to Public"
+            'cant_make_public': "Dataset {} {} {} could NOT be moved to Public",
+            'scheduler_post_failed': "*WARNING: Usage of {} {} {} could NOT be posted to the scheduler*"
         }
         if msg_type in ['imaging_paused', 'broken_tiff_file']:
             msg_text = msg_map[msg_type].format(self.pi, self.cl_number, self.name, self.z_layers_current)

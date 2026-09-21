@@ -76,7 +76,15 @@ TRASH_TIMESTAMP_MARKER_SUFFIX = ".trash_moved_at"
 # read from .env. Set SCHEDULER_POSTING_ENABLED = True after validating.
 SCHEDULER_URL = "https://scheduler.cbi.pitt.edu/cbi_logger.php"
 SCHEDULER_LOG_DIR = "/CBI_FastStore/Iana/scheduler_transmit_logs"
-SCHEDULER_POSTING_ENABLED = False
+SCHEDULER_POSTING_ENABLED = True
 # Set to any value to spoof a failed transmit and test the error log and
 # email path without contacting the scheduler (like timeLogs' fail_transmit)
 SCHEDULER_POST_TEST_FAIL = None
+# Scheduler MACHINE_IDs for MesoSPIM instruments (per Jesse, scheduler.cbi.pitt.edu).
+# Lookups normalize the instrument_id (lowercase, non-alphanumerics stripped),
+# so "mesoSPIM 1", "mesospim 1" and "mesoSPIM1" all resolve.
+SCHEDULER_MACHINE_IDS = {
+    "mesoSPIM 1": 1101,
+    "mesoSPIM 2": 1102,
+    "mesoSPIM 3": 1113,  # not a typo - the scheduler's ID for mesoSPIM 3
+}

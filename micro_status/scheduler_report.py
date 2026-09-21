@@ -62,6 +62,22 @@ def time_slot(dt, slot_mins=SCHEDULER_TIME_SLOT_MINS):
     return str(math.floor((dt.hour * 60 + dt.minute) / slot_mins)).zfill(2)
 
 
+def machine_id_for(instrument_id):
+    """
+    Look up the scheduler MACHINE_ID for an instrument_id parsed from
+    metadata. Keys are compared with lowercase letters and digits only, so
+    "mesoSPIM 1", "mesospim 1" and "mesoSPIM1" all resolve. Returns None if
+    the instrument has no mapping.
+    """
+    if not instrument_id:
+        return None
+    normalized = re.sub(r"[^a-z0-9]", "", str(instrument_id).lower())
+    for name, machine_id in SCHEDULER_MACHINE_IDS.items():
+        if re.sub(r"[^a-z0-9]", "", str(name).lower()) == normalized:
+            return machine_id
+    return None
+
+
 def build_usage_payload(dataset, start, end, slot_mins=SCHEDULER_TIME_SLOT_MINS):
     # Same convention as timeLogs: if start and end fall into the same slot,
     # push the end one slot forward so the usage still registers.
@@ -72,9 +88,25 @@ def build_usage_payload(dataset, start, end, slot_mins=SCHEDULER_TIME_SLOT_MINS)
         "RECORD_ID": record_id,
         "LABUSER": dataset.pi,
         "MACHINENAME": dataset.instrument_id,
+        "MACHINE_ID": machine_id_for(dataset.instrument_id),
         "START": start.strftime("%Y%m%d") + "-" + time_slot(start, slot_mins),
         "END": end.strftime("%Y%m%d") + "-" + time_slot(end, slot_mins),
     }
+
+
+def alert_post_failure(dataset, reason, payload=None, response_text=None, email=False):
+    """
+    Alert once per dataset (scheduler_notified flag) that its usage could not
+    be posted to the scheduler: Slack message always, failure email only when
+    a POST was actually attempted and failed.
+    """
+    if dataset.scheduler_notified:
+        return
+    dataset.send_message('scheduler_post_failed')
+    if email and payload is not None:
+        send_failure_email(payload, response_text)
+    update_dataset_record(dataset.db_id, scheduler_notified=1)
+    log.error(f"Scheduler usage post failed for {dataset.path_on_fast_store}: {reason}")
 
 
 def update_dataset_record(db_id, **fields):
@@ -97,7 +129,7 @@ def write_transmit_log(payload, response_text, error=False):
         f.write(f"{timestamp} - OUTPUT: {response_text}\n")
 
 
-def send_failure_email(payload, response_text, test=False):
+def send_failure_email(payload, response_text):
     sender = os.getenv("SCHEDULER_EMAIL_SENDER")
     password = os.getenv("SCHEDULER_EMAIL_PASSWORD")
     recipients = [x.strip() for x in os.getenv("SCHEDULER_EMAIL_RECIPIENTS", "").split(",") if x.strip()]
@@ -110,7 +142,8 @@ def send_failure_email(payload, response_text, test=False):
     message = MIMEMultipart()
     message["From"] = sender
     message["To"] = ", ".join(recipients)
-    message["Subject"] = ("TEST: " if test else "") + "ERROR: MesoSPIM Scheduler Post Failed"
+    # TEST prefix when the spoof-fail setting is active
+    message["Subject"] = ("TEST: " if SCHEDULER_POST_TEST_FAIL else "") + "ERROR: MesoSPIM Scheduler Post Failed"
     body = (
         "This email is being sent because posting MesoSPIM usage to the "
         "scheduler system failed.\n\n"
@@ -151,20 +184,19 @@ def post_mesospim_usage(dataset):
         log_once(f"{dataset.db_id}:demo", f"Ignoring scheduler usage post for demo dataset {dataset}")
         return
 
-    if not dataset.pi or not dataset.instrument_id:
-        log_once(
-            f"{dataset.db_id}:missing_fields",
-            f"Cannot post scheduler usage for {dataset.path_on_fast_store}: "
-            f"pi={dataset.pi}, instrument_id={dataset.instrument_id}",
-            level=logging.WARNING,
+    machine_id = machine_id_for(dataset.instrument_id)
+    if not dataset.pi or not dataset.instrument_id or machine_id is None:
+        alert_post_failure(
+            dataset,
+            f"pi={dataset.pi}, instrument_id={dataset.instrument_id}, machine_id={machine_id}",
         )
         return
 
     times = get_imaging_times(dataset.metadata_files)
     if not times:
-        log_once(
-            f"{dataset.db_id}:no_times",
-            f"No [Started taking images]/[Stopped taking images] times found yet for {dataset.path_on_fast_store}",
+        alert_post_failure(
+            dataset,
+            "no [Started taking images]/[Stopped taking images] times found in metadata",
         )
         return
     start, end = times
@@ -188,17 +220,12 @@ def post_mesospim_usage(dataset):
             ok = False
             text = "This is only a test"
         response = FakeFailedResponse()
-        test = True
     else:
-        test = False
         try:
             response = requests.post(SCHEDULER_URL, json=payload, auth=(user, password), timeout=30)
         except requests.RequestException as e:
-            log.error(f"Scheduler POST failed for {dataset.path_on_fast_store}: {e}")
             write_transmit_log(payload, str(e), error=True)
-            if not dataset.scheduler_notified:
-                send_failure_email(payload, str(e))
-                update_dataset_record(dataset.db_id, scheduler_notified=1)
+            alert_post_failure(dataset, str(e), payload=payload, response_text=str(e), email=True)
             return
 
     if response.ok:
@@ -212,8 +239,5 @@ def post_mesospim_usage(dataset):
         )
         log.info(f"Posted MesoSPIM usage to scheduler for {dataset.path_on_fast_store}: {json.dumps(payload)}")
     else:
-        log.error(f"Scheduler POST rejected usage for {dataset.path_on_fast_store}: {response.text}")
         write_transmit_log(payload, response.text, error=True)
-        if not dataset.scheduler_notified:
-            send_failure_email(payload, response.text, test=test)
-            update_dataset_record(dataset.db_id, scheduler_notified=1)
+        alert_post_failure(dataset, response.text, payload=payload, response_text=response.text, email=True)
