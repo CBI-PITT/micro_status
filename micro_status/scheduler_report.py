@@ -17,6 +17,8 @@ log = logging.getLogger(__name__)
 
 METADATA_TIME_FORMAT = "%Y%m%d-%H%M%S"
 SCHEDULER_TIME_SLOT_MINS = 30
+# DB modality values -> labels used in the failure email subject/body
+POST_MODALITY_LABELS = {"mesospim": "MesoSPIM", "rscm": "RSCM"}
 
 _logged_once = set()
 
@@ -55,6 +57,45 @@ def get_imaging_times(metadata_files):
     if not started_times or not stopped_times:
         return None
     return min(started_times), max(stopped_times)
+
+
+def get_rscm_imaging_times(dataset):
+    """
+    Return (start, end) datetimes for an RSCM dataset from the modification
+    times of its ribbon tiff files (<layer>/<color>/images/*.tif): the
+    earliest and latest mtime across all files. RSCM metadata has no stop
+    time and per-layer files are all written up-front, so the tiff mtimes
+    are the only reliable imaging span. Returns None while no ribbon tiffs
+    exist.
+    """
+    path_on_fast_store = str(dataset.path_on_fast_store)
+    earliest = None
+    latest = None
+    for root, dirs, files in os.walk(path_on_fast_store):
+        rel_root = os.path.relpath(root, path_on_fast_store)
+        if rel_root == ".":
+            # only layer dirs hold ribbon tiffs; skip composites and stray dirs
+            dirs[:] = [d for d in dirs if "layer" in d.lower()]
+            continue
+        if os.path.basename(root) != "images":
+            continue
+        for file in files:
+            if not file.endswith((".tif", ".tiff")):
+                continue
+            file_path = os.path.join(root, file)
+            try:
+                mtime = os.stat(file_path).st_mtime
+            except OSError as e:
+                log.warning(f"Could not stat ribbon tiff {file_path}: {e}")
+                continue
+            if earliest is None or mtime < earliest:
+                earliest = mtime
+            if latest is None or mtime > latest:
+                latest = mtime
+        dirs[:] = []  # no ribbon tiffs below the images dir
+    if earliest is None or latest is None:
+        return None
+    return datetime.fromtimestamp(earliest), datetime.fromtimestamp(latest)
 
 
 def time_slot(dt, slot_mins=SCHEDULER_TIME_SLOT_MINS):
@@ -104,7 +145,8 @@ def alert_post_failure(dataset, reason, payload=None, response_text=None, email=
         return
     dataset.send_message('scheduler_post_failed')
     if email and payload is not None:
-        send_failure_email(payload, response_text)
+        modality = POST_MODALITY_LABELS.get(str(dataset.modality).lower(), "MesoSPIM")
+        send_failure_email(payload, response_text, modality)
     update_dataset_record(dataset.db_id, scheduler_notified=1)
     log.error(f"Scheduler usage post failed for {dataset.path_on_fast_store}: {reason}")
 
@@ -129,7 +171,7 @@ def write_transmit_log(payload, response_text, error=False):
         f.write(f"{timestamp} - OUTPUT: {response_text}\n")
 
 
-def send_failure_email(payload, response_text):
+def send_failure_email(payload, response_text, modality="MesoSPIM"):
     sender = os.getenv("SCHEDULER_EMAIL_SENDER")
     password = os.getenv("SCHEDULER_EMAIL_PASSWORD")
     recipients = [x.strip() for x in os.getenv("SCHEDULER_EMAIL_RECIPIENTS", "").split(",") if x.strip()]
@@ -143,9 +185,9 @@ def send_failure_email(payload, response_text):
     message["From"] = sender
     message["To"] = ", ".join(recipients)
     # TEST prefix when the spoof-fail setting is active
-    message["Subject"] = ("TEST: " if SCHEDULER_POST_TEST_FAIL else "") + "ERROR: MesoSPIM Scheduler Post Failed"
+    message["Subject"] = ("TEST: " if SCHEDULER_POST_TEST_FAIL else "") + f"ERROR: {modality} Scheduler Post Failed"
     body = (
-        "This email is being sent because posting MesoSPIM usage to the "
+        f"This email is being sent because posting {modality} usage to the "
         "scheduler system failed.\n\n"
         f"TRANSMITTED: {json.dumps(payload)}\n\n"
         f"OUTPUT: {response_text}\n"
@@ -238,6 +280,87 @@ def post_mesospim_usage(dataset):
             scheduler_record_id=str(payload["RECORD_ID"]),
         )
         log.info(f"Posted MesoSPIM usage to scheduler for {dataset.path_on_fast_store}: {json.dumps(payload)}")
+    else:
+        write_transmit_log(payload, response.text, error=True)
+        alert_post_failure(dataset, response.text, payload=payload, response_text=response.text, email=True)
+
+
+def post_rscm_usage(dataset):
+    """
+    Build and transmit an RSCM usage record to the online scheduler for a
+    dataset whose imaging has finished. All RSCM usage posts to the single
+    "Caliber Harley" scheduler entity because metadata cannot tell which of
+    the 3 ribbon scanners was used. Safe to call on every scan: it retries
+    until the POST succeeds, then marks the dataset as posted in the DB.
+    """
+    if not SCHEDULER_POSTING_ENABLED:
+        log_once(
+            f"{dataset.db_id}:disabled",
+            f"Scheduler posting disabled; would transmit RSCM usage for {dataset.path_on_fast_store}: "
+            f"pi={dataset.pi}",
+        )
+        return
+
+    if is_demo_dataset(dataset):
+        log_once(f"{dataset.db_id}:demo", f"Ignoring scheduler usage post for demo dataset {dataset}")
+        return
+
+    if not dataset.pi:
+        alert_post_failure(
+            dataset,
+            f"missing pi={dataset.pi}",
+        )
+        return
+
+    times = get_rscm_imaging_times(dataset)
+    if not times:
+        alert_post_failure(
+            dataset,
+            "no ribbon tiff files found in layer images dirs",
+        )
+        return
+    start, end = times
+
+    user = os.getenv("SCHEDULER_USER")
+    password = os.getenv("SCHEDULER_PASS")
+    if not user or not password:
+        log_once(
+            f"{dataset.db_id}:no_creds",
+            "Scheduler POST skipped: missing SCHEDULER_USER/SCHEDULER_PASS in .env",
+            level=logging.WARNING,
+        )
+        return
+
+    # Instance-only: makes the payload self-describe with the shared RSCM
+    # scheduler entity; not written back to the DB
+    dataset.instrument_id = RSCM_SCHEDULER_MACHINE_NAME
+    payload = build_usage_payload(dataset, start, end)
+
+    if SCHEDULER_POST_TEST_FAIL:
+        # Spoof a failed transmit (like timeLogs' fail_transmit) to exercise
+        # the error log and email path without contacting the scheduler.
+        class FakeFailedResponse:
+            ok = False
+            text = "This is only a test"
+        response = FakeFailedResponse()
+    else:
+        try:
+            response = requests.post(SCHEDULER_URL, json=payload, auth=(user, password), timeout=30)
+        except requests.RequestException as e:
+            write_transmit_log(payload, str(e), error=True)
+            alert_post_failure(dataset, str(e), payload=payload, response_text=str(e), email=True)
+            return
+
+    if response.ok:
+        write_transmit_log(payload, response.text)
+        update_dataset_record(
+            dataset.db_id,
+            imaging_start=start.strftime(DATETIME_FORMAT),
+            imaging_end=end.strftime(DATETIME_FORMAT),
+            scheduler_posted=1,
+            scheduler_record_id=str(payload["RECORD_ID"]),
+        )
+        log.info(f"Posted RSCM usage to scheduler for {dataset.path_on_fast_store}: {json.dumps(payload)}")
     else:
         write_transmit_log(payload, response.text, error=True)
         alert_post_failure(dataset, response.text, payload=payload, response_text=response.text, email=True)

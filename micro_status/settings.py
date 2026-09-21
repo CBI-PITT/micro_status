@@ -87,4 +87,10 @@ SCHEDULER_MACHINE_IDS = {
     "mesoSPIM 1": 1101,
     "mesoSPIM 2": 1102,
     "mesoSPIM 3": 1113,  # not a typo - the scheduler's ID for mesoSPIM 3
+    # All 3 RSCM (ribbon scanner) scopes share one scheduler entity: metadata
+    # (vs_series.dat device) is identical across them, so per-scope posting
+    # is not possible.
+    "Caliber Harley": 1056,
 }
+# MACHINENAME self-description used for RSCM usage posts (see above)
+RSCM_SCHEDULER_MACHINE_NAME = "Caliber Harley"
