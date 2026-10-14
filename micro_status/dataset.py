@@ -86,7 +86,7 @@ class Dataset:
         self.moving = record[33]
         self.paused = record[34]
         self.public = record[35]
-        self.instrument_id = None
+        self.instrument_id = record[36]
         self.imaging_start = record[37]
         self.imaging_end = record[38]
         self.scheduler_posted = record[39]

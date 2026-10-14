@@ -20,7 +20,6 @@ class MesoSPIMDataset(Dataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.refractive_index = None
-        self.instrument_id = None
         if os.path.exists(self.path_on_fast_store):
             self.path = self.path_on_fast_store
         elif self.path_on_hive and os.path.exists(self.path_on_hive):
@@ -214,6 +213,29 @@ class MesoSPIMDataset(Dataset):
             'automated-method-slurm',
             self.path if ' ' not in self.path else f'"{self.path}"',
             '--final-file-type', 'ims'
+        ]
+        subprocess.run(cmd)
+
+    @property
+    def is_mesospim2(self):
+        # normalize like machine_id_for() so "mesoSPIM 2" and "mesospim2" both match
+        if not self.instrument_id:
+            return False
+        normalized = re.sub(r"[^a-z0-9]", "", str(self.instrument_id).lower())
+        return normalized == 'mesospim2'
+
+    def start_secondary_processing(self):
+        # launched once per dataset after the move to Hive, on the Hive copy
+        log.info(f"Queuing secondary processing for {self.path_on_fast_store}")
+        path = self.path_on_hive if self.path_on_hive and os.path.exists(self.path_on_hive) else self.path
+        cmd = [
+            MESOSPIM_SECONDARY_PYTHON,
+            MESOSPIM_SECONDARY_SCRIPT,
+            'automated-method-slurm',
+            path if ' ' not in path else f'"{path}"',
+            '--final-file-type', 'ims',
+            '--basicpy',
+            '--gain-correction'
         ]
         subprocess.run(cmd)
 

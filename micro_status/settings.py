@@ -71,6 +71,12 @@ MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 NEW_DATASET_MARKER_FILENAME = ".microstatus.json"
 TRASH_TIMESTAMP_MARKER_SUFFIX = ".trash_moved_at"
 
+# Secondary MesoSPIM processing: launched once per dataset after the move to
+# Hive completes, for datasets imaged on MesoSPIM 2 (instrument_id in the
+# dataset DB). The script queues all SLURM jobs itself, so no monitoring after launch.
+MESOSPIM_SECONDARY_PYTHON = '/h20/home/lab/miniconda3/envs/mesospim_dev/bin/python'
+MESOSPIM_SECONDARY_SCRIPT = '/h20/CBI/Iana/src/mesospim_utils/mesospim_utils/automated.py'
+
 # Online scheduler (scheduler.cbi.pitt.edu) usage posting for MesoSPIM.
 # Credentials (SCHEDULER_USER, SCHEDULER_PASS, SCHEDULER_EMAIL_PASSWORD) are
 # read from .env. Set SCHEDULER_POSTING_ENABLED = True after validating.

@@ -786,6 +786,43 @@ def check_moving():
         #     dataset.send_message('processing_started')
 
 
+def check_mesospim_secondary_processing():
+    # Launch the secondary MesoSPIM processing (MesoSPIM 2 datasets) once per
+    # dataset after the move to Hive completes. Fire-and-forget: the script
+    # queues all SLURM jobs itself, so nothing is monitored after launch.
+    print("\n ================ Checking MesoSPIM secondary processing ===============\n")
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        'SELECT path_on_fast_store FROM dataset WHERE modality = "mesospim" AND moved=1 AND paused=0 AND processing_status="finished"'
+    ).fetchall()
+    con.close()
+
+    for dataset_path in records:
+        print('\t-', dataset_path[0])
+        try:
+            dataset = MesoSPIMDataset(dataset_path[0])
+        except Exception:
+            print(traceback.format_exc())
+            continue
+        if "demo" in str(dataset.name).lower() or "test" in str(dataset.path_on_fast_store).lower():
+            continue
+        if not dataset.is_mesospim2:
+            continue
+        processing_summary = dataset.get_processing_summary()
+        if processing_summary.get('secondary_automated', {}).get('launched_at'):
+            continue
+        try:
+            dataset.start_secondary_processing()
+            dataset.update_processing_summary(
+                {'secondary_automated': {'launched_at': datetime.now().strftime(DATETIME_FORMAT)}}
+            )
+            log.info(f"Launched secondary processing for {dataset}")
+        except Exception:
+            print(traceback.format_exc())
+            continue
+
+
 def check_mesoSPIM_processing():
     print("\n ================ Checking MesoSPIM processing ===============\n")
     con = sqlite3.connect(DB_LOCATION)
@@ -1311,6 +1348,7 @@ def scan():
         check_RSCM_processing()
         check_mesoSPIM_processing()
         check_moving()
+        check_mesospim_secondary_processing()
         db_backup()
         # check_analysis()
         summary_message()
@@ -1331,6 +1369,7 @@ def scan_debug():
     check_RSCM_processing()
     check_mesoSPIM_processing()
     check_moving()
+    check_mesospim_secondary_processing()
     db_backup()
     # check_analysis()
     summary_message()
