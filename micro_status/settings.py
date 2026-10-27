@@ -71,6 +71,12 @@ MOVE_JOBS_DIR = "/CBI_FastStore/tmp/move_jobs"
 NEW_DATASET_MARKER_FILENAME = ".microstatus.json"
 TRASH_TIMESTAMP_MARKER_SUFFIX = ".trash_moved_at"
 
+# Microscope metadata archive: one zip per finished MesoSPIM dataset, plus a
+# copy next to the final Imaris file in the PI's Public folder
+MESOSPIM_METADATA_ARCHIVE_DIR = "/h20/CBI/Iana/mesospim_metadata_archive"
+# Public folder root (module constant so sandbox QA can monkeypatch it)
+PUBLIC_FOLDER_ROOT = "/h20/Public"
+
 # Secondary MesoSPIM processing: launched once per dataset after the move to
 # Hive completes, for datasets imaged on MesoSPIM 2 (instrument_id in the
 # dataset DB). The script queues all SLURM jobs itself, so no monitoring after launch.
