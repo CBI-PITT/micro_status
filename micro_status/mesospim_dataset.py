@@ -387,6 +387,14 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
             if os.path.exists(decon_folder):
                 h5_files = glob(os.path.join(decon_folder, "*.h5"))
                 ome_zarr_dirs = glob(os.path.join(decon_folder, "*.ome.zarr"))
+                if self.is_mesospim2:
+                    # keep decon tile collections so the post-move MesoSPIM 2 secondary
+                    # run (--basicpy --gain-correction) finds decon output on the Hive;
+                    # only the fused montage is re-created downstream, so it can be cleaned
+                    kept_tiles = [d for d in ome_zarr_dirs if not os.path.basename(d).endswith('_montage.ome.zarr')]
+                    if kept_tiles:
+                        log.info(f"Keeping decon tile output for MesoSPIM 2 secondary processing: {self.path_on_fast_store}")
+                    ome_zarr_dirs = [d for d in ome_zarr_dirs if os.path.basename(d).endswith('_montage.ome.zarr')]
                 if len(h5_files) or len(ome_zarr_dirs):
                     import shutil
                     for f in h5_files:
