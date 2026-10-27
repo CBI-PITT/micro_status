@@ -73,7 +73,7 @@ TRASH_TIMESTAMP_MARKER_SUFFIX = ".trash_moved_at"
 
 # Microscope metadata archive: one zip per finished MesoSPIM dataset, plus a
 # copy next to the final Imaris file in the PI's Public folder
-MESOSPIM_METADATA_ARCHIVE_DIR = "/h20/CBI/Iana/mesospim_metadata_archive"
+MESOSPIM_METADATA_ARCHIVE_DIR = "/h20/CBI/Databases/mesospim_metadata_archive"
 # Public folder root (module constant so sandbox QA can monkeypatch it)
 PUBLIC_FOLDER_ROOT = "/h20/Public"
 
