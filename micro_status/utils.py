@@ -263,3 +263,40 @@ def backup_microscope_metadata_to_zip(
         zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
 
     return out_zip
+
+
+def compose_metadata_zip_name(pi, cl_number, dataset_name, dataset_folder):
+    """
+    Compose the metadata ZIP filename for a dataset.
+
+    Returns None when pi or cl_number is missing. When a *.ome.zarr.xml exists at
+    the top level of dataset_folder, the alphabetically first one supplies the zarr
+    component (its ".ome.zarr.xml" suffix stripped); otherwise the btf variant is used.
+
+    Parameters
+    ----------
+    pi:
+        PI name; falsy -> None.
+    cl_number:
+        CL number; falsy -> None.
+    dataset_name:
+        Dataset name component.
+    dataset_folder:
+        Folder scanned (top level only) for a *.ome.zarr.xml marker.
+
+    Returns
+    -------
+    Sanitized "<pi>_<cl_number>_<dataset_name>[_<zarr>]_metadata.zip" or None.
+    """
+    if not pi or not cl_number:
+        return None
+
+    zarr_name = None
+    xml_files = sorted(glob(os.path.join(str(dataset_folder), "*.ome.zarr.xml")))
+    if xml_files:
+        zarr_name = os.path.basename(xml_files[0]).removesuffix(".ome.zarr.xml")
+
+    stem = f"{pi}_{cl_number}_{dataset_name}"
+    if zarr_name:
+        stem = f"{stem}_{zarr_name}"
+    return re.sub(r'[^A-Za-z0-9._-]+', '_', stem) + "_metadata.zip"
