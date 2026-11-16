@@ -86,6 +86,25 @@ PUBLIC_FOLDER_ROOT = "/h20/Public"
 MESOSPIM_SECONDARY_PYTHON = '/h20/home/lab/miniconda3/envs/mesospim_dev/bin/python'
 MESOSPIM_SECONDARY_SCRIPT = '/h20/CBI/Iana/src/mesospim_utils/mesospim_utils/automated.py'
 
+# Automatic virtual-zarr mosaic manifest (channels format, consumable by
+# mesospim-virtual-zarr): written once per OME-Zarr dataset into the dataset
+# root when imaging finishes. Tile placement uses automatic grid offsets from
+# overlap_yx, so users may hand-edit the file (e.g. fitted positions) - the bot
+# never overwrites an existing manifest.
+MESOSPIM_MOSAIC_MANIFEST_FILENAME = "mosaic.json"
+# Default Neuroglancer layer color per channel wavelength token (unknown
+# channels get no color key and render as the default grayscale layer)
+MOSAIC_CHANNEL_COLORS = {
+    "405": "blue",
+    "488": "green",
+    "561": "red",
+    "638": "magenta",
+    "640": "magenta",
+    "647": "magenta",
+}
+# Fallback overlap when stage positions or camera parameters are missing
+MOSAIC_DEFAULT_OVERLAP = [0.10, 0.10]
+
 # Online scheduler (scheduler.cbi.pitt.edu) usage posting for MesoSPIM.
 # Credentials (SCHEDULER_USER, SCHEDULER_PASS, SCHEDULER_EMAIL_PASSWORD) are
 # read from .env. Set SCHEDULER_POSTING_ENABLED = True after validating.

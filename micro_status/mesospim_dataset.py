@@ -363,11 +363,127 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
             log.info(f"Updated imaging status to finished for {self.path_on_fast_store}")
             self.send_message('imaging_finished')
             backup_zarr_v2_metadata_to_zip(xml_files[0].replace('.xml', ''))
+            self.create_mosaic_manifest()
             self.start_processing()
             self.update_processing_status('in_progress')
             log.info(f"Updated processing status to in_progress for {self.path_on_fast_store}")
             self.send_message('processing_started')
             self.stitch_maxips()
+
+    def create_mosaic_manifest(self):
+        """Write a mesospim-virtual-zarr manifest (channels format) into the
+        dataset root once imaging finishes. Never overwrites an existing file."""
+        try:
+            manifest_path = os.path.join(self.path_on_fast_store, MESOSPIM_MOSAIC_MANIFEST_FILENAME)
+            if os.path.exists(manifest_path):
+                log.info(f"Mosaic manifest already exists, not overwriting: {manifest_path}")
+                return
+            channel_groups = self._mosaic_channel_groups()
+            if not channel_groups:
+                log.info(f"No zarr tile groups for mosaic manifest: {self.path_on_fast_store}")
+                return
+            rows, cols, overlap = self._mosaic_grid()
+            if not rows or not cols:
+                log.info(f"Could not determine mosaic grid size: {self.path_on_fast_store}")
+                return
+            channel_entries = []
+            for token, tiles in channel_groups:
+                if len(tiles) != rows * cols:
+                    log.info(f"Skipping mosaic manifest, Ch{token} has {len(tiles)} tiles "
+                             f"but grid is {rows}x{cols}: {self.path_on_fast_store}")
+                    return
+                entry = {"name": f"Ch{token}", "tiles": tiles}
+                number = re.findall(r"\d+", token)
+                color = MOSAIC_CHANNEL_COLORS.get(number[0]) if number else None
+                if color:
+                    entry["color"] = color
+                channel_entries.append(entry)
+            dataset_name = os.path.basename(os.path.normpath(self.path_on_fast_store))
+            payload = {
+                "channels": channel_entries,
+                "rows": rows,
+                "cols": cols,
+                "overlap_yx": [round(overlap[0], 3), round(overlap[1], 3)],
+                "chunk_shape_zyx": [32, 256, 256],
+                "blend": "feather",
+                "row_direction": 1,
+                "col_direction": 1,
+                "gzip_level": 0,
+                "cache_chunks": 8,
+                "max_concurrent_chunks": 4,
+                "name": f"{dataset_name} virtual mosaic",
+                "mount_path": "stitched.ome.zarr",
+            }
+            with open(manifest_path, "w") as f:
+                json.dump(payload, f, indent=2)
+            log.info(f"Wrote mosaic manifest {manifest_path}")
+        except Exception as e:
+            log.error(f"ERROR writing mosaic manifest for {self.path_on_fast_store}: {e}")
+
+    def _mosaic_channel_groups(self):
+        """Relative tile paths grouped by channel token, each list sorted by tile
+        number (col-major convention: tile_index = col * rows + row)."""
+        groups = {}
+        for tile_path in self.tile_files:
+            match = re.search(self.tile_name_pattern, os.path.basename(tile_path))
+            if not match:
+                continue
+            rel = os.path.relpath(tile_path, self.path_on_fast_store)
+            groups.setdefault(match.group(2), []).append((int(match.group(1)), rel))
+        return [(token, [rel for _, rel in sorted(tiles)])
+                for token, tiles in sorted(groups.items())]
+
+    def _mosaic_grid(self):
+        """(rows, cols, overlap_yx) from the stage metadata of the first channel."""
+        rows, cols = self.grid_size
+        overlap = [MOSAIC_DEFAULT_OVERLAP[0], MOSAIC_DEFAULT_OVERLAP[1]]
+        metadata_files = self.metadata_files
+        if not metadata_files:
+            return rows, cols, overlap
+        first_channel = re.findall(r"_Ch([0-9]+[a-zA-Z]?)_", os.path.basename(metadata_files[0]))
+        if not first_channel:
+            return rows, cols, overlap
+        channel_metas = [x for x in metadata_files if f"_Ch{first_channel[0]}_" in os.path.basename(x)]
+        x_positions = []
+        y_positions = []
+        pixelsize = x_pixels = y_pixels = None
+        for file in channel_metas:
+            with open(file, "r") as f:
+                lines = f.readlines()
+            x = [l for l in lines if "[x_pos]" in l]
+            y = [l for l in lines if "[y_pos]" in l]
+            if x and y:
+                x_positions.append(float(re.findall(r"-?\d+(?:\.\d+)?", x[0])[0]))
+                y_positions.append(float(re.findall(r"-?\d+(?:\.\d+)?", y[0])[0]))
+            if pixelsize is None:
+                xy = [l for l in lines if "[Pixelsize in um]" in l]
+                xp = [l for l in lines if "[x_pixels]" in l]
+                yp = [l for l in lines if "[y_pixels]" in l]
+                if xy and xp and yp:
+                    pixelsize = float(re.findall(r"\d+(?:\.\d+)?", xy[0])[0])
+                    x_pixels = float(re.findall(r"\d+", xp[0])[0])
+                    y_pixels = float(re.findall(r"\d+", yp[0])[0])
+        if not (pixelsize and x_pixels and y_pixels):
+            return rows, cols, overlap
+        step_y = self._median_stage_step(y_positions)
+        step_x = self._median_stage_step(x_positions)
+        if step_y:
+            overlap[0] = min(max(1.0 - step_y / (pixelsize * y_pixels), 0.0), 0.99)
+        if step_x:
+            overlap[1] = min(max(1.0 - step_x / (pixelsize * x_pixels), 0.0), 0.99)
+        return rows, cols, overlap
+
+    @staticmethod
+    def _median_stage_step(positions):
+        """Median positive gap between unique stage positions (um), or None."""
+        unique = sorted(set(positions))
+        if len(unique) < 2:
+            return None
+        diffs = sorted(b - a for a, b in zip(unique, unique[1:]) if b > a)
+        if not diffs:
+            return None
+        mid = len(diffs) // 2
+        return diffs[mid] if len(diffs) % 2 else (diffs[mid - 1] + diffs[mid]) / 2.0
 
     def start_processing(self):
         log.info(f"Queuing processing for {self.path_on_fast_store}")
