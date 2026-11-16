@@ -20,7 +20,6 @@ class MesoSPIMDataset(Dataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.refractive_index = None
-        self.instrument_id = None
         if os.path.exists(self.path_on_fast_store):
             self.path = self.path_on_fast_store
         elif self.path_on_hive and os.path.exists(self.path_on_hive):
@@ -217,6 +216,29 @@ class MesoSPIMDataset(Dataset):
         ]
         subprocess.run(cmd)
 
+    @property
+    def is_mesospim2(self):
+        # normalize like machine_id_for() so "mesoSPIM 2" and "mesospim2" both match
+        if not self.instrument_id:
+            return False
+        normalized = re.sub(r"[^a-z0-9]", "", str(self.instrument_id).lower())
+        return normalized == 'mesospim2'
+
+    def start_secondary_processing(self):
+        # launched once per dataset after the move to Hive, on the Hive copy
+        log.info(f"Queuing secondary processing for {self.path_on_fast_store}")
+        path = self.path_on_hive if self.path_on_hive and os.path.exists(self.path_on_hive) else self.path
+        cmd = [
+            MESOSPIM_SECONDARY_PYTHON,
+            MESOSPIM_SECONDARY_SCRIPT,
+            'automated-method-slurm',
+            path if ' ' not in path else f'"{path}"',
+            '--final-file-type', 'ims',
+            '--basicpy',
+            '--gain-correction'
+        ]
+        subprocess.run(cmd)
+
     def check_tile_ims_files(self):
         from imaris_ims_file_reader import ims
         all_good = True
@@ -365,6 +387,14 @@ class MesoSPIMZarrDataset(MesoSPIMDataset):
             if os.path.exists(decon_folder):
                 h5_files = glob(os.path.join(decon_folder, "*.h5"))
                 ome_zarr_dirs = glob(os.path.join(decon_folder, "*.ome.zarr"))
+                if self.is_mesospim2:
+                    # keep decon tile collections so the post-move MesoSPIM 2 secondary
+                    # run (--basicpy --gain-correction) finds decon output on the Hive;
+                    # only the fused montage is re-created downstream, so it can be cleaned
+                    kept_tiles = [d for d in ome_zarr_dirs if not os.path.basename(d).endswith('_montage.ome.zarr')]
+                    if kept_tiles:
+                        log.info(f"Keeping decon tile output for MesoSPIM 2 secondary processing: {self.path_on_fast_store}")
+                    ome_zarr_dirs = [d for d in ome_zarr_dirs if os.path.basename(d).endswith('_montage.ome.zarr')]
                 if len(h5_files) or len(ome_zarr_dirs):
                     import shutil
                     for f in h5_files:

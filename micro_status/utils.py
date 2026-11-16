@@ -7,6 +7,9 @@ import os
 import sys
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
+import re
+from glob import glob
+from zipfile import BadZipFile
 
 
 def can_be_moved():
@@ -116,6 +119,8 @@ def fetch_thread_replies(channel, thread_ts):
 
 ZARR_V2_METADATA_FILENAMES = {".zattrs", ".zgroup", ".zarray"}
 
+MICROSCOPE_METADATA_SUFFIXES = ('.txt', '.json', '.xml', '.xml.original', '.csv')
+
 
 def backup_zarr_v2_metadata_to_zip(
     ome_zarr_path,
@@ -184,5 +189,193 @@ def backup_zarr_v2_metadata_to_zip(
                 "files": archived_relpaths,
             }
             zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
+
+    return out_zip
+
+
+def backup_microscope_metadata_to_zip(
+    dataset_folder,
+    zip_path,
+    *,
+    compression=ZIP_DEFLATED,
+):
+    """
+    Create a ZIP backup of top-level microscope metadata files from an acquisition folder.
+
+    Captures:
+      - Top-level files only (no recursion into subfolders)
+      - Files ending with a suffix in MICROSCOPE_METADATA_SUFFIXES
+      - Skips hidden files (names starting with ".")
+
+    Staleness self-heal: if zip_path already exists, its MANIFEST.json is compared
+    against the current file set; identical -> returned unchanged, different -> rebuilt.
+
+    Parameters
+    ----------
+    dataset_folder:
+        Filesystem path to the acquisition folder (e.g. ".../091426_2").
+    zip_path:
+        Output ZIP file path.
+    compression:
+        zipfile compression mode (default ZIP_DEFLATED).
+
+    Returns
+    -------
+    Path to the created (or unchanged) ZIP.
+    """
+    root = Path(dataset_folder).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise FileNotFoundError(f"dataset_folder does not exist or is not a directory: {root}")
+
+    out_zip = Path(zip_path).expanduser().resolve()
+    out_zip.parent.mkdir(parents=True, exist_ok=True)
+
+    # Top-level entries only; no rglob/walk
+    metadata_files = []
+    for name in os.listdir(root):
+        if name.startswith("."):
+            continue
+        full_path = os.path.join(root, name)
+        if os.path.isfile(full_path) and name.endswith(MICROSCOPE_METADATA_SUFFIXES):
+            metadata_files.append(name)
+    metadata_files = sorted(metadata_files)
+
+    if out_zip.exists():
+        try:
+            with ZipFile(out_zip, mode="r") as zf:
+                existing = json.loads(zf.read("MANIFEST.json").decode("utf-8"))
+            if existing.get("files") == metadata_files:
+                return out_zip
+        except (OSError, BadZipFile, KeyError, ValueError):
+            # Unreadable/missing manifest -> treat as stale and rebuild below
+            pass
+
+    with ZipFile(out_zip, mode="w", compression=compression) as zf:
+        for name in metadata_files:
+            zf.write(os.path.join(root, name), arcname=os.path.basename(name))
+
+        manifest = {
+            "root": root.name,
+            "metadata_suffixes": sorted(MICROSCOPE_METADATA_SUFFIXES),
+            "file_count": len(metadata_files),
+            "files": metadata_files,
+        }
+        zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
+
+    return out_zip
+
+
+def compose_metadata_zip_name(pi, cl_number, dataset_name, dataset_folder, *, suffix="_metadata.zip"):
+    """
+    Compose the ZIP filename for a dataset archive.
+
+    Returns None when pi or cl_number is missing. When a *.ome.zarr.xml exists at
+    the top level of dataset_folder, the alphabetically first one supplies the zarr
+    component (its ".ome.zarr.xml" suffix stripped); otherwise the btf variant is used.
+
+    Parameters
+    ----------
+    pi:
+        PI name; falsy -> None.
+    cl_number:
+        CL number; falsy -> None.
+    dataset_name:
+        Dataset name component.
+    dataset_folder:
+        Folder scanned (top level only) for a *.ome.zarr.xml marker.
+    suffix:
+        Zip name suffix; defaults to "_metadata.zip" (pass "_slurm_logs.zip"
+        for the SLURM logs archive variant).
+
+    Returns
+    -------
+    Sanitized "<pi>_<cl_number>_<dataset_name>[_<zarr>]<suffix>" or None.
+    """
+    if not pi or not cl_number:
+        return None
+
+    zarr_name = None
+    xml_files = sorted(glob(os.path.join(str(dataset_folder), "*.ome.zarr.xml")))
+    if xml_files:
+        zarr_name = os.path.basename(xml_files[0]).removesuffix(".ome.zarr.xml")
+
+    stem = f"{pi}_{cl_number}_{dataset_name}"
+    if zarr_name:
+        stem = f"{stem}_{zarr_name}"
+    return re.sub(r'[^A-Za-z0-9._-]+', '_', stem) + suffix
+
+
+def backup_slurm_logs_to_zip(
+    logs_dir,
+    zip_path,
+    *,
+    compression=ZIP_DEFLATED,
+):
+    """
+    Create a ZIP backup of a SLURM logs directory (logs_mesospim_utils).
+
+    Captures:
+      - Every non-hidden file in the directory tree (no suffix filter)
+      - Files stored with paths relative to logs_dir
+
+    Staleness self-heal: if zip_path already exists, its MANIFEST.json is compared
+    against the current (path, size) set; identical -> returned unchanged,
+    different -> rebuilt. Sizes (not just names) are compared because SLURM
+    appends to log files while jobs run.
+
+    Parameters
+    ----------
+    logs_dir:
+        Filesystem path to the logs directory (e.g. ".../102126/logs_mesospim_utils").
+    zip_path:
+        Output ZIP file path.
+    compression:
+        zipfile compression mode (default ZIP_DEFLATED).
+
+    Returns
+    -------
+    Path to the created (or unchanged) ZIP, or None when the directory holds no files.
+    """
+    root = Path(logs_dir).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise FileNotFoundError(f"logs_dir does not exist or is not a directory: {root}")
+
+    out_zip = Path(zip_path).expanduser().resolve()
+    out_zip.parent.mkdir(parents=True, exist_ok=True)
+
+    # Whole directory tree; skip hidden files
+    log_files = []
+    for p in root.rglob("*"):
+        if p.is_file() and not p.name.startswith("."):
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            log_files.append([p.relative_to(root).as_posix(), size])
+    log_files.sort()
+
+    if not log_files:
+        return None
+
+    if out_zip.exists():
+        try:
+            with ZipFile(out_zip, mode="r") as zf:
+                existing = json.loads(zf.read("MANIFEST.json").decode("utf-8"))
+            if existing.get("files") == log_files:
+                return out_zip
+        except (OSError, BadZipFile, KeyError, ValueError):
+            # Unreadable/missing manifest -> treat as stale and rebuild below
+            pass
+
+    with ZipFile(out_zip, mode="w", compression=compression) as zf:
+        for rel, _size in log_files:
+            zf.write(os.path.join(root, rel), arcname=rel)
+
+        manifest = {
+            "root": root.name,
+            "file_count": len(log_files),
+            "files": log_files,
+        }
+        zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
 
     return out_zip

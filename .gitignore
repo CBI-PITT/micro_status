@@ -66,6 +66,9 @@ secrets
 # Custom config files
 *.conf.custom
 
+# Local agent change notes (kept out of the repo)
+AGENT_NOTES.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
