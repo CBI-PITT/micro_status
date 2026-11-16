@@ -74,6 +74,9 @@ TRASH_TIMESTAMP_MARKER_SUFFIX = ".trash_moved_at"
 # Microscope metadata archive: one zip per finished MesoSPIM dataset, plus a
 # copy next to the final Imaris file in the PI's Public folder
 MESOSPIM_METADATA_ARCHIVE_DIR = "/h20/CBI/Databases/mesospim_metadata_archive"
+# SLURM logs archive: one zip of the logs_mesospim_utils dir per moved
+# MesoSPIM dataset (same zip name as the metadata backup, _slurm_logs.zip)
+MESOSPIM_SLURM_LOGS_ARCHIVE_DIR = "/h20/CBI/Databases/mesospim_logs_archive"
 # Public folder root (module constant so sandbox QA can monkeypatch it)
 PUBLIC_FOLDER_ROOT = "/h20/Public"
 

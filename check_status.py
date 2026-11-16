@@ -81,6 +81,7 @@ from micro_status.settings import *  # TODO replace this with normal import
 from micro_status.warning import Warning
 from micro_status.utils import can_be_moved
 from micro_status.utils import backup_microscope_metadata_to_zip, compose_metadata_zip_name
+from micro_status.utils import backup_slurm_logs_to_zip
 
 
 # console_handler = logging.StreamHandler()
@@ -918,6 +919,56 @@ def check_mesospim_metadata_backup():
             continue
 
 
+def check_mesospim_slurm_logs_backup():
+    # Back up the SLURM logs directory (logs_mesospim_utils) of MesoSPIM datasets
+    # to a zip in the logs archive dir once the dataset has moved to Hive.
+    # Log-only: no Dataset instantiation, no Slack messages, no DB writes.
+    print("\n ================ Checking MesoSPIM slurm logs backup ===============\n")
+    # moved=1 only: the zip is written straight to the archive dir (never into
+    # the dataset folder), so no new file can break the move script's
+    # "rclone check" verification. It also runs after any MesoSPIM 2 secondary
+    # processing started, so its logs are picked up by the manifest self-heal.
+    con = sqlite3.connect(DB_LOCATION)
+    cur = con.cursor()
+    records = cur.execute(
+        "SELECT d.path_on_fast_store, d.path_on_hive, d.name, p.name AS pi_name, c.name AS cl_name "
+        "FROM dataset d LEFT JOIN pi p ON d.pi = p.id LEFT JOIN clnumber c ON d.cl_number = c.id "
+        "WHERE d.modality='mesospim' AND d.moved=1"
+    ).fetchall()
+    con.close()
+
+    for path_on_fast_store, path_on_hive, name, pi_name, cl_name in records:
+        try:
+            if "demo" in str(name).lower() or "test" in str(path_on_fast_store).lower():
+                continue
+            if os.path.exists(path_on_fast_store):
+                source_folder = path_on_fast_store
+            elif path_on_hive and os.path.exists(path_on_hive):
+                source_folder = path_on_hive
+            else:
+                log.warning(f"MesoSPIM slurm logs backup: no existing source folder for dataset {name} (faststore={path_on_fast_store}, hive={path_on_hive})")
+                continue
+            logs_dir = os.path.join(source_folder, 'logs_mesospim_utils')
+            if not os.path.isdir(logs_dir):
+                log.info(f"MesoSPIM slurm logs backup: no logs_mesospim_utils dir for dataset {name}: {logs_dir}")
+                continue
+            zip_name = compose_metadata_zip_name(pi_name, cl_name, name, source_folder, suffix="_slurm_logs.zip")
+            if zip_name is None:
+                log.warning(f"MesoSPIM slurm logs backup: missing PI or CL number for dataset {name}, skipping zip")
+                continue
+
+            os.makedirs(MESOSPIM_SLURM_LOGS_ARCHIVE_DIR, exist_ok=True)
+            archive_zip_path = os.path.join(MESOSPIM_SLURM_LOGS_ARCHIVE_DIR, zip_name)
+            archive_zip = backup_slurm_logs_to_zip(logs_dir, archive_zip_path)
+            if archive_zip:
+                log.info(f"MesoSPIM slurm logs zip archived for dataset {name}: {archive_zip}")
+            else:
+                log.info(f"MesoSPIM slurm logs backup: empty logs dir for dataset {name}, no zip written")
+        except Exception as e:
+            log.error(f"MesoSPIM slurm logs backup failed for dataset {name}: {e}")
+            continue
+
+
 def check_mesoSPIM_processing():
     print("\n ================ Checking MesoSPIM processing ===============\n")
     con = sqlite3.connect(DB_LOCATION)
@@ -1445,6 +1496,7 @@ def scan():
         check_moving()
         check_mesospim_secondary_processing()
         check_mesospim_metadata_backup()
+        check_mesospim_slurm_logs_backup()
         db_backup()
         # check_analysis()
         summary_message()
@@ -1467,6 +1519,7 @@ def scan_debug():
     check_moving()
     check_mesospim_secondary_processing()
     check_mesospim_metadata_backup()
+    check_mesospim_slurm_logs_backup()
     db_backup()
     # check_analysis()
     summary_message()
